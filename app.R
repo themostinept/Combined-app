@@ -4,11 +4,13 @@ library(maptools)
 library(openxlsx)
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 
+#Элементы пользовательского интерфейса
 ui <- fluidPage(
-  
+  #Заголовок
   titlePanel("Коды ОКТМО по административным границам"),
   
   sidebarLayout(
+  #Панель меню
     sidebarPanel(
       fileInput("shp_file", label = h4("Выберите shp и сопутствующие ему файлы"), multiple = TRUE, accept = c(".shp", ".dbf", ".sbn", ".sbx", ".shx", ".prj")),
       hr(),
@@ -21,20 +23,20 @@ ui <- fluidPage(
       fluidRow(column(3)),
       downloadButton("Download", label = "Скачать результат")
     ),
-  
+  #Панель вывода резульатов (пока проверка координат на корректность написания)
   mainPanel(
     textOutput("Dataset_check")
   )
  )
 )
 
-
+#Серверная часть приложения
 server <- function(input, output) {
-  
+  #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
   full_dataset <- reactive({
     input$checkbox
   })
-    
+  #Чтение xlsx-файла и преобразование его координат в колонки с долготой и широтой  
   region_ds <- reactive({
     inFile <- input$xlsx_file
     if (is.null(inFile) == T) {
@@ -47,7 +49,7 @@ server <- function(input, output) {
                                          mutate(lon = as.numeric(gsub(",", ".", lon)), lat = as.numeric(gsub(",", ".", lat))))
     return(region_dataset)  
   })
-
+  #Проверка координат на корректность написания (если координаты некорректны, дальнейшее исполнение не имеет смысла)
   output$Dataset_check <- renderText({
     inFile <- input$xlsx_file
     if (is.null(inFile) == T) {
@@ -57,10 +59,11 @@ server <- function(input, output) {
       bad_rows <- unique(c(which(is.na(region_ds()$lon) == T), which(is.na(region_ds()$lat) == T)))
       print(paste("Incorrect coordinates in this rows:", paste(sort(bad_rows + 1), collapse = ", ")))
       } else {
-      print("Correct coordinates.")
+        print("Correct coordinates.")
     }
   })
-  
+  #Сначала переименуем shp и связанные с ним файлы, поскольку в shiny они автоматически переименовываются при импорте.
+  #Затем ставим нужную кодировку атрибутам.
   map_shp <- reactive({
     req(input$shp_file)
     shpdf <- input$shp_file
@@ -72,8 +75,7 @@ server <- function(input, output) {
     region@data$NAME <- unlist(lapply(region@data$NAME, function(x) iconv(x, 'UTF-8')))
     return(region)
   })
-  
-
+  #Прогоняем датафрейм с координатами (предварительно превратив его в матрицу) по границам shp-файла и сохраняем результат
   result <- reactive({
     if (is.null(map_shp) == T) {
       return(NULL)
@@ -90,7 +92,7 @@ server <- function(input, output) {
       return(compared)
     })
   })
-  
+  #Вывод результата в формате xlsx через кнопку загрузки
   output$Download <- downloadHandler(
     filename <- function() {
       "Comparison.xlsx"
