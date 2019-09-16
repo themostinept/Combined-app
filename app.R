@@ -1,43 +1,46 @@
 library(shiny)
+library(shinythemes)
 library(tidyverse)
 library(maptools)
 library(openxlsx)
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 
 #Элементы пользовательского интерфейса
-ui <- fluidPage(
-  #Заголовок
-  titlePanel("Коды ОКТМО по административным границам"),
-  
-  sidebarLayout(
-  #Панель меню
-    sidebarPanel(
-      h4("На заметку*"),
-      helpText("Shp и связанные с ним файлы должны иметь одинаковые названия.
-                В xlsx-файле обязательно должна присутствовать колонка 'point',
-                где координаты должны быть записаны в формате 'долгота широта' с пробелом между ними без каких-либо лишних знаков."),
-      hr(),
-      fileInput("shp_file", label = h4("Выберите shp и сопутствующие ему файлы"), multiple = TRUE, accept = c(".shp", ".dbf", ".sbn", ".sbx", ".shx", ".prj")),
-      hr(),
-      fluidRow(column(4)),
-      fileInput("xlsx_file", label = h4("Выберите xlsx-файл"), accept = ".xlsx"),
-      hr(),
-      fluidRow(column(4)),
-      checkboxInput("checkbox", label = "Сохранить исходный файл полностью", value = TRUE),
-      hr(),
-      fluidRow(column(3)),
-      downloadButton("Download", label = "Скачать результат")
+ui <- tagList(
+  navbarPage(
+    theme = shinythemes::shinytheme("cerulean"),
+    title = "Всякие приложения",
+    tabPanel(title = "Коды ОКТМО",
+      sidebarPanel(
+        h4("На заметку*"),
+        helpText("Shp и связанные с ним файлы должны иметь одинаковые названия.
+                  В xlsx-файле обязательно должна присутствовать колонка 'point',
+                  где координаты должны быть записаны в формате 'долгота широта' с пробелом между ними без каких-либо лишних знаков."),
+        hr(),
+        fileInput("shp_file", label = h4("Выберите shp и сопутствующие ему файлы"), multiple = TRUE, accept = c(".shp", ".dbf", ".sbn", ".sbx", ".shx", ".prj")),
+        hr(),
+        fluidRow(column(4)),
+        fileInput("xlsx_file", label = h4("Выберите xlsx-файл"), accept = ".xlsx"),
+        hr(),
+        fluidRow(column(4)),
+        checkboxInput("checkbox", label = "Сохранить исходный файл полностью", value = TRUE),
+        hr(),
+        fluidRow(column(3)),
+        downloadButton("Download", label = "Скачать результат")
+        ),
+        #Панель вывода резульатов (пока проверка координат на корректность написания)
+        mainPanel(
+        textOutput("Dataset_check")
+        )
     ),
-  #Панель вывода резульатов (пока проверка координат на корректность написания)
-  mainPanel(
-    textOutput("Dataset_check")
+    tabPanel(title = "Геокодер")
   )
- )
 )
 
 #Серверная часть приложения
 server <- function(input, output) {
-  options(shiny.maxRequestSize=30*1024^2)
+  #Устанавливаем максимальный размер загружаемого файла равным 30 Мб
+  options(shiny.maxRequestSize = 30*1024^2)
   #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
   full_dataset <- reactive({
     input$checkbox
