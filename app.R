@@ -37,6 +37,7 @@ ui <- fluidPage(
 
 #Серверная часть приложения
 server <- function(input, output) {
+  options(shiny.maxRequestSize=30*1024^2)
   #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
   full_dataset <- reactive({
     input$checkbox
