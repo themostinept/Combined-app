@@ -2,6 +2,7 @@ library(shiny)
 library(shinythemes)
 library(tidyverse)
 library(maptools)
+library(jsonlite)
 library(openxlsx)
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 
@@ -33,14 +34,30 @@ ui <- tagList(
         textOutput("Dataset_check")
         )
     ),
-    tabPanel(title = "Геокодер")
+    tabPanel(title = "Поиск организаций",
+      sidebarPanel(
+        textInput("search_line", label = h4("Введите запрос")),
+        hr(),
+        fluidRow(column(4)),
+        textInput("key_line", label = h4("Введите api-ключ")),
+        hr(),
+        fluidRow(column(2)),
+        textInput("coordru_line", label = h4("Введите координаты области поиска: сначала верхнюю правую, затем нижнюю левую")),
+        textInput("coordld_line", label = h4()),
+        hr(),
+        fluidRow(column(4)),
+        numericInput("num_line", label = h4("Укажите четное число квадратов, на которые следует разбить область поиска"), 10)
+      )
+    )
   )
 )
 
 #Серверная часть приложения
 server <- function(input, output) {
-  #Устанавливаем максимальный размер загружаемого файла равным 30 Мб
+#Устанавливаем максимальный размер загружаемого файла равным 30 Мб
   options(shiny.maxRequestSize = 30*1024^2)
+  
+#Простановка кодов ОКТМО
   #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
   full_dataset <- reactive({
     input$checkbox
@@ -110,6 +127,8 @@ server <- function(input, output) {
       write.xlsx(result(), file)
     }
   )
+
+#API Яндекса для поиска организаций
 }
 
 shinyApp(ui, server)
