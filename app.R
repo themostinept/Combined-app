@@ -36,6 +36,12 @@ ui <- tagList(
     ),
     tabPanel(title = "Поиск организаций",
       sidebarPanel(
+        h4("На заметку*"),
+        helpText("Для проверки результата запроса на попадание в границы региона и автоматического присовения кодов ОКТМО
+                 загрузите через меню предыдущей вкладки shp и связанные с ним файлы.
+                 Координаты должны передаваться в том же виде, в котором их выдают Яндекс-карты.
+                 Высота и ширина области поиска подбираются интуитивно."),
+        hr(),
         textInput("search_line", label = h4("Введите запрос")),
         hr(),
         fluidRow(column(4)),
@@ -46,7 +52,15 @@ ui <- tagList(
         textInput("coordld_line", label = h4()),
         hr(),
         fluidRow(column(4)),
-        numericInput("num_line", label = h4("Укажите четное число квадратов, на которые следует разбить область поиска"), 10)
+        numericInput("num_line", label = h4("Укажите высоту разбивки области поиска"), 3),
+        fluidRow(column(4)),
+        numericInput("num_line", label = h4("Укажите ширину разбивки области поиска"), 3),
+        hr(),
+        fluidRow(column(4)),
+        checkboxInput("checkbox", label = "Проверять координаты на попадание в границы региона", value = TRUE),
+        hr(),
+        fluidRow(column(3)),
+        downloadButton("Download", label = "Скачать результат")
       )
     )
   )
