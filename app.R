@@ -84,37 +84,37 @@ ui <- tagList(
         downloadButton("Download", label = "Скачать результат")
         ),
         #Панель вывода резульатов (пока проверка координат на корректность написания)
-        mainPanel(
-        textOutput("Dataset_check")
-        )
+      mainPanel(
+      textOutput("Dataset_check")
+      )
     ),
     tabPanel(title = "Поиск организаций",
       sidebarPanel(
+        fluidRow(column(4)),
         h4("На заметку*"),
-        helpText("Для проверки результата запроса на попадание в границы региона и автоматического присовения кодов ОКТМО
+        helpText("Для проверки результата запроса на попадание в границы региона и автоматического присвоения кодов ОКТМО,
                  загрузите через меню предыдущей вкладки shp и связанные с ним файлы.
                  Координаты должны передаваться в том же виде, в котором их выдают Яндекс-карты.
                  Высота и ширина области поиска подбираются интуитивно."),
         hr(),
-        textInput("search_line", label = h4("Введите запрос"), value = "Аптека"),
+        textInput("search_line", label = h5("Введите запрос"), value = "Аптека"),
+        textInput("key_line", label = h5("Введите api-ключ"), value = NA),
+        textInput("coordru_line", label = h5("Введите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"), value = '58.622468, 31.406503'),
+        textInput("coordld_line", label = h5(), value = '58.461637, 31.118112'),
+        numericInput("num_line_h", label = h5("Укажите высоту разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
+        numericInput("num_line_w", label = h5("Укажите ширину разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
+        checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE)
+      ),
+        #Панель вывода резульатов (пока проверка координат на корректность написания)
+      mainPanel(
+        div(style = "position:absolute;right:1em;", 
+            actionButton("Load_yandex_search", "Получить список"),
+            downloadButton("Download_yandex_search", label = "Скачать результат")
+        ),
         hr(),
-        fluidRow(column(4)),
-        textInput("key_line", label = h4("Введите api-ключ"), value = '3d382e5a-4cbd-4f19-86e0-112a084057a9'),
+        textOutput("Result_check"),
         hr(),
-        fluidRow(column(2)),
-        textInput("coordru_line", label = h4("Введите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"), value = '58.622468, 31.406503'),
-        textInput("coordld_line", label = h4(), value = '58.461637, 31.118112'),
-        hr(),
-        fluidRow(column(4)),
-        numericInput("num_line_h", label = h4("Укажите высоту разбивки области поиска"), 1),
-        fluidRow(column(4)),
-        numericInput("num_line_w", label = h4("Укажите ширину разбивки области поиска"), 2),
-        hr(),
-        fluidRow(column(4)),
-        checkboxInput("checkbox_oktmo", label = "Проверять координаты на попадание в границы региона", value = FALSE),
-        hr(),
-        fluidRow(column(3)),
-        downloadButton("Download_yandex_search", label = "Скачать результат")
+        tableOutput("ya_table")
       )
     )
   )
@@ -222,7 +222,7 @@ server <- function(input, output) {
   #Разбиваем область поиска на блоки
   coords <- reactive({make_grid(ru(), ld(), height(), width())})
   #Сохраняем результаты группы запросов в один датафрейм
-  result_ya <- reactive({
+  result_ya <- eventReactive(input$Load_yandex_search, {
     result <- data.frame()
     for (i in 1:length(coords())) {
       res <- yandex_geosearch_bb(search_req(), coords()[[i]], apikey())
@@ -234,11 +234,19 @@ server <- function(input, output) {
       m <- matrix(c(result$Lon, result$Lat), ncol = 2)
       points_polygon <- SpatialPoints(m, proj4string = crswgs84)
       result <- cbind(result,(over(points_polygon, map_shp())))
+      result <- result[which(is.na(result[ ,ncol(result)]) == FALSE), ]
       return(result)
     } else {
       return(result)
     }
-  })  
+  })
+  #Вывод таблицы с результатами
+  output$Result_check <- renderText({
+    print(paste("Всего найдено ", nrow(result_ya()), " организаций по запросу.", sep = ""))
+  })
+  output$ya_table <- renderTable({
+    result_ya()
+  })
   #Вывод результата в формате xlsx через кнопку загрузки
   output$Download_yandex_search <- downloadHandler(
     filename <- function() {
