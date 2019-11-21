@@ -4,6 +4,8 @@ library(tidyverse)
 library(maptools)
 library(jsonlite)
 library(openxlsx)
+library(xml2)
+library(curl)
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 yandex_geosearch_bb <- function(search_req, coords, apikey) {
   coords <- unlist(strsplit(trimws(coords), split = "_"))
@@ -83,7 +85,7 @@ ui <- tagList(
         fluidRow(column(3)),
         downloadButton("Download", label = "Скачать результат")
         ),
-        #Панель вывода резульатов (пока проверка координат на корректность написания)
+        #Панель вывода результатов (пока проверка координат на корректность написания)
       mainPanel(
       textOutput("Dataset_check")
       )
@@ -93,7 +95,7 @@ ui <- tagList(
         fluidRow(column(4)),
         h4("На заметку*"),
         helpText("Для проверки результата запроса на попадание в границы региона и автоматического присвоения кодов ОКТМО,
-                 загрузите через меню предыдущей вкладки shp и связанные с ним файлы.
+                 загрузите через меню вкладки 'Коды ОКТМО' и связанные с ним файлы.
                  Координаты должны передаваться в том же виде, в котором их выдают Яндекс-карты.
                  Высота и ширина области поиска подбираются интуитивно."),
         hr(),
@@ -105,7 +107,7 @@ ui <- tagList(
         numericInput("num_line_w", label = h5("Укажите ширину разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
         checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE)
       ),
-        #Панель вывода резульатов (пока проверка координат на корректность написания)
+        #Панель вывода результатов
       mainPanel(
         div(style = "position:absolute;right:1em;", 
             actionButton("Load_yandex_search", "Получить список"),
@@ -115,6 +117,35 @@ ui <- tagList(
         textOutput("Result_check"),
         hr(),
         tableOutput("ya_table")
+      )
+    ),
+    tabPanel(title = "Мини-геокодер",
+      sidebarPanel(
+        fluidRow(column(4)),
+        h4("На заметку*"),
+        helpText("Для проверки результата запроса на попадание в границы региона и автоматического присвоения кодов ОКТМО,
+        загрузите через меню вкладки 'Коды ОКТМО' shp и связанные с ним файлы.
+        Файл с адресами может содержать любое количество столбцов с любыми названиями. Главное - выбрать нужный.
+        Результат геокодирования сильно зависит от корректности написания адреса и от наличия в нем посторонней информации."),
+        hr(),
+        fileInput("address_file", label = h4("Выберите xlsx-файл"), accept = ".xlsx"),
+        hr(),
+        numericInput("column_num", label = h4("Укажите номер столбца с адресами"), value = 1, min = 1, step = 1),
+        hr(),
+        checkboxInput("bbox", label = h5("Ограничить область поиска координат"), value = FALSE),
+        hr(),
+        helpText("При ограничении области поиска, укажите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"),
+        textInput("coordru_line", label = h5(), value = NULL),
+        textInput("coordld_line", label = h5(), value = NULL)
+      ),
+      #Панель вывода результатов
+      mainPanel(
+        div(style = "position:absolute;right:1em;", 
+            actionButton("Start_geocoding", "Получить координаты"),
+            downloadButton("Download_yandex_geocode", label = "Скачать результат")
+        ),
+        hr(),
+        textOutput("Geocode results")
       )
     )
   )
@@ -256,6 +287,18 @@ server <- function(input, output) {
       write.xlsx(result_ya(), file)
     }
   )
+  
+  #API геокодера Яндекса
+  #Чтение xlsx-файла  
+  to_geo <- reactive({
+    input_file <- input$address_file
+    if (is.null(input_file) == T) {
+      return(NULL)
+    }
+  })
+  column_num <- reactive({
+    input$column_num
+  })
 }
 
 shinyApp(ui, server)
