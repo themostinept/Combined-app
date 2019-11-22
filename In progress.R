@@ -1,8 +1,8 @@
 yandex_geocode <- function(search_line, apikey, ...) {
-  geo_find <- function(geocode, rspn = 0, bbox = NULL, coord_left_low, coord_right_up) {
+  geo_find <- function(geocode, rspn = 0, coord_left_low, coord_right_up) {
     #Combine a complete url for request
     geocode <- paste(unlist(strsplit(geocode, split = " ")), collapse = "+")
-    if (rspn > 0 & is.null(bbox) == FALSE) {
+    if (rspn == 1) {
       coord1 <- unlist(strsplit(coord_left_low, split = ", "))
       coord1 <- paste(coord1[2], coord1[1], sep = ",")
       coord2 <- unlist(strsplit(coord_right_up, split = ", "))
@@ -22,12 +22,15 @@ yandex_geocode <- function(search_line, apikey, ...) {
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$LocalityName,
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$ThoroughfareName,
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$Premise$PremiseNumber), function(x) ifelse(is.null(x) == T, NA, x)))
-    print(found_add)
+    output$Geocode_results <- renderText({
+      print(found_add)
+    })
     return(found_add)
   }
   geocode_result <- lapply(search_line, function(x) tryCatch(geo_find(x),
                                                              error = function(e) 'error'))
   geocode_result <- as.data.frame(do.call(rbind, geocode_result))
   colnames(geocode_result) <- c('AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
+  geocode_result <- cbind(search_line, geocode_result)
   return(geocode_result)
 }

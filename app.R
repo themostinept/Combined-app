@@ -34,6 +34,41 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   colnames(total) <- c("Name", "Address", "URL", "Lat", "Lon")
   return(total)
 }
+
+yandex_geocode <- function(search_line, apikey, ...) {
+  geo_find <- function(geocode, rspn = rspn(), coord_left_low = ld_2(), coord_right_up = ru_2()) {
+    #Combine a complete url for request
+    geocode <- paste(unlist(strsplit(geocode, split = " ")), collapse = "+")
+    if (rspn == 1) {
+      coord1 <- unlist(strsplit(coord_left_low, split = ", "))
+      coord1 <- paste(coord1[2], coord1[1], sep = ",")
+      coord2 <- unlist(strsplit(coord_right_up, split = ", "))
+      coord2 <- paste(coord2[2], coord2[1], sep = ",")
+      url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), "&rspn=", rspn, "&bbox=", coord1, "~", coord2, collapse = ""))
+    } else {
+      url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), collapse = ""))
+    }
+    result <- as_list(read_xml(url))
+    result_to_parse <- result$ymaps$GeoObjectCollection$featureMember$GeoObject$metaDataProperty$GeocoderMetaData
+    found_add <- unlist(lapply(list(result_to_parse$text,
+                                    result[["ymaps"]][["GeoObjectCollection"]][["featureMember"]][["GeoObject"]][["Point"]][["pos"]][[1]],
+                                    result_to_parse$kind,
+                                    result_to_parse$precision,
+                                    result_to_parse$AddressDetails$Country$CountryName,
+                                    result_to_parse$AddressDetails$Country$AdministrativeArea$AdministrativeAreaName,
+                                    result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$LocalityName,
+                                    result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$ThoroughfareName,
+                                    result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$Premise$PremiseNumber), function(x) ifelse(is.null(x) == T, NA, x)))
+    return(found_add)
+  }
+  geocode_result <- lapply(search_line, function(x) tryCatch(geo_find(x),
+                                                             error = function(e) 'error'))
+  geocode_result <- as.data.frame(do.call(rbind, geocode_result))
+  colnames(geocode_result) <- c('AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
+  geocode_result <- cbind(search_line, geocode_result)
+  return(geocode_result)
+}
+
 make_grid <- function(ru, ld, height, width) {
   if (height > 1 || width > 1) {
     coord1 <- as.numeric(unlist(strsplit(trimws(ru), split = ",")))
@@ -128,15 +163,19 @@ ui <- tagList(
         Файл с адресами может содержать любое количество столбцов с любыми названиями. Главное - выбрать нужный.
         Результат геокодирования сильно зависит от корректности написания адреса и от наличия в нем посторонней информации."),
         hr(),
-        fileInput("address_file", label = h4("Выберите xlsx-файл"), accept = ".xlsx"),
+        fileInput("address_file", label = h5("Выберите xlsx-файл"), accept = ".xlsx"),
         hr(),
-        numericInput("column_num", label = h4("Укажите номер столбца с адресами"), value = 1, min = 1, step = 1),
+        selectInput("select_col" ,label = h5("Укажите столбец с адресом"),  choices = "", selected = NULL, multiple = FALSE),
+        hr(),
+        numericInput("column_num", label = h5("Укажите номер столбца с адресами"), value = 1, min = 1, step = 1),
+        hr(),
+        textInput("geo_key_line", label = h5("Введите api-ключ (лучше использовать свой)"), value = '2ed244eb-29c9-49fa-8508-80a84c1d69b0'),
         hr(),
         checkboxInput("bbox", label = h5("Ограничить область поиска координат"), value = FALSE),
         hr(),
         helpText("При ограничении области поиска, укажите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"),
-        textInput("coordru_line", label = h5(), value = NULL),
-        textInput("coordld_line", label = h5(), value = NULL)
+        textInput("coordru_line_2", label = h5(), value = NULL),
+        textInput("coordld_line_2", label = h5(), value = NULL)
       ),
       #Панель вывода результатов
       mainPanel(
@@ -145,7 +184,7 @@ ui <- tagList(
             downloadButton("Download_yandex_geocode", label = "Скачать результат")
         ),
         hr(),
-        textOutput("Geocode results")
+        textOutput("Geocode_results")
       )
     )
   )
@@ -289,15 +328,51 @@ server <- function(input, output) {
   )
   
   #API геокодера Яндекса
-  #Чтение xlsx-файла  
+  #Чтение xlsx-файла и входных параметров
   to_geo <- reactive({
+    req(input$address_file)
     input_file <- input$address_file
-    if (is.null(input_file) == T) {
-      return(NULL)
-    }
+    file.rename(input_file$datapath, paste(input_file$datapath, ".xlsx", sep=""))
+    to_geo <- read.xlsx(paste(input_file$datapath, ".xlsx", sep = ""), sheet = 1, colNames = T, skipEmptyRows = F, skipEmptyCols = F)
+    return(to_geo)
+  })
+  geo_apikey <- reactive({
+    input$geo_key_line
   })
   column_num <- reactive({
     input$column_num
+  })
+  rspn <- reactive({
+    if (input$bbox == FALSE) {
+      return(0)
+    } else {
+      return(1)
+    }
+  })
+  ru_2 <- reactive({
+    input$coordru_line_2
+  })
+  ld_2 <- reactive({
+    input$coordld_line_2
+  })
+  #Вывод результата
+  #observe({
+ #   req(to_geo())
+#    updateSelectInput("select_col", choices = names(to_geo()))
+#  })
+  result_geo <- eventReactive(input$Start_geocoding, {
+    yandex_geocode(to_geo()[[ , column_num()]], geo_apikey())
+  })
+  output$Download_yandex_geocode <- downloadHandler(
+    filename <- function() {
+      "Yandex_geocode.xlsx"
+    },
+    content <- function(file) {
+      write.xlsx(result_geo(), file)
+    }
+  )
+  output$Geocode_results <- renderText({
+    print(result_geo())
   })
 }
 
