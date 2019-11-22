@@ -64,8 +64,9 @@ yandex_geocode <- function(search_line, apikey, rspn, coord_left_low, coord_righ
   }
   geocode_result <- lapply(search_line, function(x) geo_find(x))
   geocode_result <- as.data.frame(do.call(rbind, geocode_result))
-  #colnames(geocode_result) <- c('AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
+  colnames(geocode_result) <- c('AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
   geocode_result <- cbind(search_line, geocode_result)
+  print('Done!')
   return(geocode_result)
 }
 
@@ -353,6 +354,12 @@ server <- function(input, output, session) {
   })
   result_geo <- eventReactive(input$Start_geocoding, {
     yandex_geocode(search_line = to_geo()[[input$select_col]], apikey = geo_apikey(), rspn = rspn(), coord_left_low = ld_2(), coord_right_up = ru_2())
+    output$Geocode_results <- renderPrint({
+      result_geo()
+    })
+  })
+  output$Geocode_results <- renderPrint({
+    result_geo()
   })
   output$Download_yandex_geocode <- downloadHandler(
     filename <- function() {
@@ -362,9 +369,6 @@ server <- function(input, output, session) {
     write.xlsx(result_geo(), file)
   }
  )
- output$Geocode_results <- renderText({
-    print(result_geo())
- })
 }
 
 shinyApp(ui, server)
