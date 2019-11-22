@@ -22,9 +22,7 @@ yandex_geocode <- function(search_line, apikey, ...) {
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$LocalityName,
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$ThoroughfareName,
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$Premise$PremiseNumber), function(x) ifelse(is.null(x) == T, NA, x)))
-    output$Geocode_results <- renderText({
-      print(found_add)
-    })
+    print(found_add)
     return(found_add)
   }
   geocode_result <- lapply(search_line, function(x) tryCatch(geo_find(x),

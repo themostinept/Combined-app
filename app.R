@@ -35,16 +35,16 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   return(total)
 }
 
-yandex_geocode <- function(search_line, apikey, ...) {
-  geo_find <- function(geocode, rspn = rspn(), coord_left_low = ld_2(), coord_right_up = ru_2()) {
+yandex_geocode <- function(search_line, apikey, rspn, coord_left_low, coord_right_up) {
+  geo_find <- function(geocode, coord_left_low, coord_right_up) {
     #Combine a complete url for request
     geocode <- paste(unlist(strsplit(geocode, split = " ")), collapse = "+")
-    if (rspn == 1) {
+    if (rspn == TRUE) {
       coord1 <- unlist(strsplit(coord_left_low, split = ", "))
       coord1 <- paste(coord1[2], coord1[1], sep = ",")
       coord2 <- unlist(strsplit(coord_right_up, split = ", "))
       coord2 <- paste(coord2[2], coord2[1], sep = ",")
-      url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), "&rspn=", rspn, "&bbox=", coord1, "~", coord2, collapse = ""))
+      url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), "&rspn=1", "&bbox=", coord1, "~", coord2, collapse = ""))
     } else {
       url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), collapse = ""))
     }
@@ -59,12 +59,12 @@ yandex_geocode <- function(search_line, apikey, ...) {
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$LocalityName,
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$ThoroughfareName,
                                     result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$Premise$PremiseNumber), function(x) ifelse(is.null(x) == T, NA, x)))
+    print(found_add)
     return(found_add)
   }
-  geocode_result <- lapply(search_line, function(x) tryCatch(geo_find(x),
-                                                             error = function(e) 'error'))
+  geocode_result <- lapply(search_line, function(x) geo_find(x))
   geocode_result <- as.data.frame(do.call(rbind, geocode_result))
-  colnames(geocode_result) <- c('AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
+  #colnames(geocode_result) <- c('AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
   geocode_result <- cbind(search_line, geocode_result)
   return(geocode_result)
 }
@@ -165,9 +165,7 @@ ui <- tagList(
         hr(),
         fileInput("address_file", label = h5("Выберите xlsx-файл"), accept = ".xlsx"),
         hr(),
-        selectInput("select_col" ,label = h5("Укажите столбец с адресом"),  choices = "", selected = NULL, multiple = FALSE),
-        hr(),
-        numericInput("column_num", label = h5("Укажите номер столбца с адресами"), value = 1, min = 1, step = 1),
+        selectInput("select_col", label = h5("Укажите столбец с адресом"),  choices = "", selected = NULL, multiple = FALSE),
         hr(),
         textInput("geo_key_line", label = h5("Введите api-ключ (лучше использовать свой)"), value = '2ed244eb-29c9-49fa-8508-80a84c1d69b0'),
         hr(),
@@ -191,7 +189,7 @@ ui <- tagList(
 )
 
 #Серверная часть приложения
-server <- function(input, output) {
+server <- function(input, output, session) {
 #Устанавливаем максимальный размер загружаемого файла равным 30 Мб
   options(shiny.maxRequestSize = 30*1024^2)
   
@@ -339,15 +337,8 @@ server <- function(input, output) {
   geo_apikey <- reactive({
     input$geo_key_line
   })
-  column_num <- reactive({
-    input$column_num
-  })
   rspn <- reactive({
-    if (input$bbox == FALSE) {
-      return(0)
-    } else {
-      return(1)
-    }
+    input$bbox
   })
   ru_2 <- reactive({
     input$coordru_line_2
@@ -356,24 +347,24 @@ server <- function(input, output) {
     input$coordld_line_2
   })
   #Вывод результата
-  #observe({
- #   req(to_geo())
-#    updateSelectInput("select_col", choices = names(to_geo()))
-#  })
+  observe({
+    req(to_geo())
+    updateSelectInput(session = session, inputId = "select_col", choices = colnames(to_geo()))
+  })
   result_geo <- eventReactive(input$Start_geocoding, {
-    yandex_geocode(to_geo()[[ , column_num()]], geo_apikey())
+    yandex_geocode(search_line = to_geo()[[input$select_col]], apikey = geo_apikey(), rspn = rspn(), coord_left_low = ld_2(), coord_right_up = ru_2())
   })
   output$Download_yandex_geocode <- downloadHandler(
     filename <- function() {
       "Yandex_geocode.xlsx"
-    },
-    content <- function(file) {
-      write.xlsx(result_geo(), file)
-    }
-  )
-  output$Geocode_results <- renderText({
+  },
+  content <- function(file) {
+    write.xlsx(result_geo(), file)
+  }
+ )
+ output$Geocode_results <- renderText({
     print(result_geo())
-  })
+ })
 }
 
 shinyApp(ui, server)
