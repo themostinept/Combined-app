@@ -4,6 +4,8 @@ library(tidyverse)
 library(maptools)
 library(jsonlite)
 library(openxlsx)
+library(xml2)
+library(curl)
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 yandex_geosearch_bb <- function(search_req, coords, apikey) {
   coords <- unlist(strsplit(trimws(coords), split = "_"))
@@ -32,6 +34,33 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   colnames(total) <- c("Name", "Address", "URL", "Lat", "Lon")
   return(total)
 }
+
+geo_find <- function(geocode, apikey, rspn, coord_left_low, coord_right_up) {
+  #Combine a complete url for request
+  geocode <- paste(unlist(strsplit(geocode, split = " ")), collapse = "+")
+  if (rspn == TRUE) {
+    coord1 <- unlist(strsplit(coord_left_low, split = ", "))
+    coord1 <- paste(coord1[2], coord1[1], sep = ",")
+    coord2 <- unlist(strsplit(coord_right_up, split = ", "))
+    coord2 <- paste(coord2[2], coord2[1], sep = ",")
+    url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), "&rspn=1", "&bbox=", coord1, "~", coord2, collapse = ""))
+  } else {
+    url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), collapse = ""))
+  }
+  result <- as_list(read_xml(url))
+  result_to_parse <- result$ymaps$GeoObjectCollection$featureMember$GeoObject$metaDataProperty$GeocoderMetaData
+  found_add <- unlist(lapply(list(result_to_parse$text,
+                                  result[["ymaps"]][["GeoObjectCollection"]][["featureMember"]][["GeoObject"]][["Point"]][["pos"]][[1]],
+                                  result_to_parse$kind,
+                                  result_to_parse$precision,
+                                  result_to_parse$AddressDetails$Country$CountryName,
+                                  result_to_parse$AddressDetails$Country$AdministrativeArea$AdministrativeAreaName,
+                                  result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$LocalityName,
+                                  result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$ThoroughfareName,
+                                  result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$Premise$PremiseNumber), function(x) ifelse(is.null(x) == T, NA, x)))
+  return(found_add)
+}
+  
 make_grid <- function(ru, ld, height, width) {
   if (height > 1 || width > 1) {
     coord1 <- as.numeric(unlist(strsplit(trimws(ru), split = ",")))
@@ -83,7 +112,7 @@ ui <- tagList(
         fluidRow(column(3)),
         downloadButton("Download", label = "Скачать результат")
         ),
-        #Панель вывода резульатов (пока проверка координат на корректность написания)
+        #Панель вывода результатов (пока проверка координат на корректность написания)
       mainPanel(
       textOutput("Dataset_check")
       )
@@ -93,7 +122,7 @@ ui <- tagList(
         fluidRow(column(4)),
         h4("На заметку*"),
         helpText("Для проверки результата запроса на попадание в границы региона и автоматического присвоения кодов ОКТМО,
-                 загрузите через меню предыдущей вкладки shp и связанные с ним файлы.
+                 загрузите через меню вкладки 'Коды ОКТМО' и связанные с ним файлы.
                  Координаты должны передаваться в том же виде, в котором их выдают Яндекс-карты.
                  Высота и ширина области поиска подбираются интуитивно."),
         hr(),
@@ -105,7 +134,7 @@ ui <- tagList(
         numericInput("num_line_w", label = h5("Укажите ширину разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
         checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE)
       ),
-        #Панель вывода резульатов (пока проверка координат на корректность написания)
+        #Панель вывода результатов
       mainPanel(
         div(style = "position:absolute;right:1em;", 
             actionButton("Load_yandex_search", "Получить список"),
@@ -116,12 +145,41 @@ ui <- tagList(
         hr(),
         tableOutput("ya_table")
       )
+    ),
+    tabPanel(title = "Мини-геокодер",
+      sidebarPanel(
+        fluidRow(column(4)),
+        h4("На заметку*"),
+        helpText("Файл с адресами может содержать любое количество столбцов с любыми названиями. Главное - выбрать нужный.
+        Результат геокодирования сильно зависит от корректности написания адреса и от наличия в нем посторонней информации."),
+        hr(),
+        fileInput("address_file", label = h5("Выберите xlsx-файл"), accept = ".xlsx"),
+        hr(),
+        selectInput("select_col", label = h5("Укажите столбец с адресом"),  choices = "", selected = NULL, multiple = FALSE),
+        hr(),
+        textInput("geo_key_line", label = h5("Введите api-ключ (лучше использовать свой)"), value = '2ed244eb-29c9-49fa-8508-80a84c1d69b0'),
+        hr(),
+        checkboxInput("bbox", label = h5("Ограничить область поиска координат"), value = FALSE),
+        hr(),
+        helpText("При ограничении области поиска, укажите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"),
+        textInput("coordru_line_2", label = h5(), value = NULL),
+        textInput("coordld_line_2", label = h5(), value = NULL)
+      ),
+      #Панель вывода результатов
+      mainPanel(
+        div(style = "position:absolute;right:1em;", 
+            actionButton("Start_geocoding", "Получить координаты"),
+            downloadButton("Download_yandex_geocode", label = "Скачать результат")
+        ),
+        hr(),
+        tableOutput("Geocode_results")
+      )
     )
   )
 )
 
 #Серверная часть приложения
-server <- function(input, output) {
+server <- function(input, output, session) {
 #Устанавливаем максимальный размер загружаемого файла равным 30 Мб
   options(shiny.maxRequestSize = 30*1024^2)
   
@@ -174,17 +232,16 @@ server <- function(input, output) {
     if (is.null(map_shp) == T) {
       return(NULL)
     }
-    withProgress({
-      setProgress(message = "Идет обработка...")
-      m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
-      points_polygon <- SpatialPoints(m, proj4string = crswgs84)
-      if (full_dataset() == F) {
-        compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
-      } else {
-        compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
-      }
-      return(compared)
-    })
+    showModal(modalDialog("Проверяем координаты на попадание в границы"))
+    m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
+    points_polygon <- SpatialPoints(m, proj4string = crswgs84)
+    if (full_dataset() == F) {
+      compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
+    } else {
+      compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
+    }
+    removeModal()
+    return(compared)
   })
   #Вывод результата в формате xlsx через кнопку загрузки
   output$Download <- downloadHandler(
@@ -256,6 +313,64 @@ server <- function(input, output) {
       write.xlsx(result_ya(), file)
     }
   )
+  
+  #API геокодера Яндекса
+  #Чтение xlsx-файла и входных параметров
+  to_geo <- reactive({
+    req(input$address_file)
+    input_file <- input$address_file
+    file.rename(input_file$datapath, paste(input_file$datapath, ".xlsx", sep=""))
+    to_geo <- read.xlsx(paste(input_file$datapath, ".xlsx", sep = ""), sheet = 1, colNames = T, skipEmptyRows = F, skipEmptyCols = F)
+    return(to_geo)
+  })
+  geo_apikey <- reactive({
+    input$geo_key_line
+  })
+  rspn <- reactive({
+    input$bbox
+  })
+  ru_2 <- reactive({
+    input$coordru_line_2
+  })
+  ld_2 <- reactive({
+    input$coordld_line_2
+  })
+  #Передаем названия столбцов для выбора столбца с адресом
+  observe({
+    req(to_geo())
+    updateSelectInput(session = session, inputId = "select_col", choices = colnames(to_geo()))
+  })
+  #Ищем координаты и ставим шкалу прогресса
+  result_geo <- eventReactive(input$Start_geocoding, {
+    progress <- Progress$new()
+    on.exit(progress$close())
+    progress$set(message = "Ищем координату", value = 0)
+    inc <- 0
+    geocode_result <- lapply(to_geo()[[input$select_col]], function(x) {
+                                                              res <- tryCatch(geo_find(x, rspn = rspn(), apikey = geo_apikey(), coord_left_low = ld_2(), coord_right_up = ru_2()),
+                                                              error = function(e) 'error')
+                                                              inc <<- inc + 1
+                                                              progress$inc(1 / nrow(to_geo()), detail = paste("Найдена", inc, "из", nrow(to_geo())))
+                                                              return(res)
+                                                           }
+    )
+    geocode_result <- as.data.frame(do.call(rbind, geocode_result))
+    geocode_result <- cbind(to_geo()[[input$select_col]], geocode_result)
+    colnames(geocode_result) <- c('Request', 'AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
+    return(geocode_result)
+  })
+  #Вывод таблицы с результатами и сохранение их в xlsx-файл
+  output$Geocode_results <- renderTable({
+    result_geo()
+  })
+  output$Download_yandex_geocode <- downloadHandler(
+    filename <- function() {
+      "Yandex_geocode.xlsx"
+  },
+  content <- function(file) {
+    write.xlsx(result_geo(), file)
+  }
+ )
 }
 
 shinyApp(ui, server)
