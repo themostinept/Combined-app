@@ -232,17 +232,16 @@ server <- function(input, output, session) {
     if (is.null(map_shp) == T) {
       return(NULL)
     }
-    withProgress({
-      setProgress(message = "Идет обработка...")
-      m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
-      points_polygon <- SpatialPoints(m, proj4string = crswgs84)
-      if (full_dataset() == F) {
-        compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
-      } else {
-        compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
-      }
-      return(compared)
-    })
+    showModal(modalDialog("Проверяем координаты на попадание в границы"))
+    m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
+    points_polygon <- SpatialPoints(m, proj4string = crswgs84)
+    if (full_dataset() == F) {
+      compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
+    } else {
+      compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
+    }
+    removeModal()
+    return(compared)
   })
   #Вывод результата в формате xlsx через кнопку загрузки
   output$Download <- downloadHandler(
@@ -351,7 +350,7 @@ server <- function(input, output, session) {
                                                               res <- tryCatch(geo_find(x, rspn = rspn(), apikey = geo_apikey(), coord_left_low = ld_2(), coord_right_up = ru_2()),
                                                               error = function(e) 'error')
                                                               inc <<- inc + 1
-                                                              progress$inc(1/nrow(to_geo()), detail = paste("Найдена", inc, "из", nrow(to_geo())))
+                                                              progress$inc(1 / nrow(to_geo()), detail = paste("Найдена", inc, "из", nrow(to_geo())))
                                                               return(res)
                                                            }
     )
