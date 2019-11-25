@@ -157,7 +157,7 @@ ui <- tagList(
         hr(),
         selectInput("select_col", label = h5("Укажите столбец с адресом"),  choices = "", selected = NULL, multiple = FALSE),
         hr(),
-        textInput("geo_key_line", label = h5("Введите api-ключ (лучше использовать свой)"), value = '2ed244eb-29c9-49fa-8508-80a84c1d69b0'),
+        textInput("geo_key_line", label = h5("Введите api-ключ (лучше использовать свой)"), value = '3a5bc8be-5f3a-40c8-8bee-8089834d5bff'),
         hr(),
         checkboxInput("bbox", label = h5("Ограничить область поиска координат"), value = FALSE),
         hr(),
