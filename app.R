@@ -1,11 +1,13 @@
+options(shiny.sanitize.errors = FALSE)
+
 library(shiny)
 library(shinythemes)
 library(tidyverse)
 library(maptools)
 library(jsonlite)
 library(openxlsx)
-library(xml2)
 library(curl)
+
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 yandex_geosearch_bb <- function(search_req, coords, apikey) {
   coords <- unlist(strsplit(trimws(coords), split = "_"))
@@ -30,8 +32,9 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   vec_geo <- unlist(geo$coordinates)
   geo_df <- data.frame(lat = vec_geo[seq(2,length(vec_geo), by = 2)], lon = vec_geo[seq(1,length(vec_geo), by = 2)])
   #Combine our vectors in a dataframe
-  total <- cbind(prop$name, prop$description, ifelse(is.null(prop$CompanyMetaData$url) == TRUE, rep(NA, length(prop$name)), prop$CompanyMetaData$url), geo_df)
-  colnames(total) <- c("Name", "Address", "URL", "Lat", "Lon")
+  total <- cbind(prop$name, prop$description, geo_df)
+  colnames(total) <- c("Name", "Address", "Lat", "Lon")
+  total <- distinct_at(total, vars(c(1, 2)), keep.all = TRUE)
   return(total)
 }
 
@@ -235,7 +238,7 @@ server <- function(input, output, session) {
     showModal(modalDialog("Проверяем координаты на попадание в границы"))
     m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
     points_polygon <- SpatialPoints(m, proj4string = crswgs84)
-    if (full_dataset() == F) {
+    if (full_dataset() == FALSE) {
       compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
     } else {
       compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
