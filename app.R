@@ -131,11 +131,12 @@ ui <- tagList(
         hr(),
         textInput("search_line", label = h5("Введите запрос"), value = "Аптека"),
         textInput("key_line", label = h5("Введите api-ключ"), value = NA),
-        textInput("coordru_line", label = h5("Введите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"), value = '58.622468, 31.406503'),
-        textInput("coordld_line", label = h5(), value = '58.461637, 31.118112'),
-        numericInput("num_line_h", label = h5("Укажите высоту разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
-        numericInput("num_line_w", label = h5("Укажите ширину разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
-        checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE)
+        checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE),
+        p("Для каждой области поиска введите координаты: сначала верхнюю правую, затем нижнюю левую. После этого установите высоту и ширину
+          разбивки области поиска на прямоугольники."),
+        actionButton("add", "Добавить область"),
+        actionButton("remove", "Удалить область"),
+        div(id = "searcharea", style = "padding: 22px; border: 1px solid silver;")
       ),
         #Панель вывода результатов
       mainPanel(
@@ -258,18 +259,35 @@ server <- function(input, output, session) {
 
 #API Яндекса для поиска организаций
   #Записываем входные параметры
-  ru <- reactive({
-    input$coordru_line
+  values <- reactiveValues(num_areas = 0)
+  observeEvent(input$add, ignoreNULL = FALSE, {
+    values$num_areas <- values$num_areas + 1
+    num <<- values$num_areas
+    insertUI(
+      selector = "#searcharea", where = "beforeEnd",
+      fluidRow(
+        id = paste0("search_a", num),
+        splitLayout(cellWidths = c("50%","50%"),
+                    textInput(paste0("coordru_line", num), label = h5(strong(paste0(num, ") Верхняя правая"))), value = '58.622468, 31.406503'),
+                    textInput(paste0("coordld_line", num), label = h5(strong("Нижняя левая")), value = '58.461637, 31.118112')),
+        splitLayout(cellWidths = c("50%","50%"),
+                    numericInput(paste0("num_line_h", num), label = h5("Высота разбивки"), value = 1, min = 1, max = 10, step = 1),
+                    numericInput(paste0("num_line_w", num), label = h5("Ширина разбивки"), value = 1, min = 1, max = 10, step = 1))
+      )
+    )
   })
-  ld <- reactive({
-    input$coordld_line
-  })
-  height <- reactive({
-    input$num_line_h
-  })
-  width <- reactive({
-    input$num_line_w
-  })
+  #ru <- reactive({
+  #  input$coordru_line
+ # })
+ # ld <- reactive({
+  #  input$coordld_line
+  #})
+#  height <- reactive({
+ #   input$num_line_h
+#  })
+ # width <- reactive({
+  #  input$num_line_w
+#  })
   search_req <- reactive({
     input$search_line
   })
@@ -279,8 +297,23 @@ server <- function(input, output, session) {
   check_oktmo <- reactive({
     input$checkbox_oktmo
   })
+  search_areas <- reactive({
+    sa <- matrix(nrow = num, ncol = 4)
+    for (i in 1:num) {
+      sa[i, 1] <- input[[paste0("coordru_line", i)]]
+      sa[i, 2] <- input[[paste0("coordld_line", i)]]
+      sa[i, 3] <- input[[paste0("num_line_h", i)]]
+      sa[i, 4] <- input[[paste0("num_line_w", i)]]
+    }
+    return(sa)
+  })
   #Разбиваем область поиска на блоки
-  coords <- reactive({make_grid(ru(), ld(), height(), width())})
+  coords <- reactive({
+    coords <- matrix()
+    for (i in 1:num) {
+      coords <- rbind(coords, make_grid(search_areas()[i, 1], search_areas()[i, 2], search_areas()[i, 3], search_areas()[i, 4]))
+    }
+  })
   #Сохраняем результаты группы запросов в один датафрейм
   result_ya <- eventReactive(input$Load_yandex_search, {
     result <- data.frame()
