@@ -259,12 +259,12 @@ server <- function(input, output, session) {
   #Записываем входные параметры
   values <- reactiveValues(num_areas = 0)
   observeEvent(input$add, ignoreNULL = FALSE, {
+    Sys.sleep(0.5)
     values$num_areas <- values$num_areas + 1
     num <<- values$num_areas
     insertUI(
       selector = "#searcharea", where = "beforeEnd",
       fluidRow(
-        id = paste0("search_a", num),
         splitLayout(cellWidths = c("50%","50%"),
                     textInput(paste0("coordru_line", num), label = h5(strong(paste0(num, ") Верхняя правая"))), value = '58.622468, 31.406503'),
                     textInput(paste0("coordld_line", num), label = h5(strong("Нижняя левая")), value = '58.461637, 31.118112')),
@@ -273,6 +273,16 @@ server <- function(input, output, session) {
                     numericInput(paste0("num_line_w", num), label = h5("Ширина разбивки"), value = 1, min = 1, max = 10, step = 1))
       )
     )
+  })
+  observeEvent(input$remove, {
+    Sys.sleep(0.5)
+    if (num > 1) {
+      removeUI(
+        selector = "div.row:last-child"
+      )
+      values$num_areas <- values$num_areas - 1
+      num <<- values$num_areas
+    }
   })
   search_req <- reactive({
     input$search_line
@@ -288,7 +298,7 @@ server <- function(input, output, session) {
   result_ya <- eventReactive(input$Load_yandex_search, {
     coords <- make_grid(input[[paste0("coordru_line", 1)]], input[[paste0("coordld_line", 1)]], input[[paste0("num_line_h", 1)]], input[[paste0("num_line_w", 1)]])
     if (num > 1) {
-      for (i in seq_len(num)[-1]) {
+      for (i in 2:num) {
         coords <- rbind(coords, make_grid(input[[paste0("coordru_line", i)]], input[[paste0("coordld_line", i)]], input[[paste0("num_line_h", i)]], input[[paste0("num_line_w", i)]]))
       }
     }
