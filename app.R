@@ -1,4 +1,4 @@
-options(shiny.sanitize.errors = FALSE)
+options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 30*1024^2)
 
 library(shiny)
 library(shinythemes)
@@ -34,7 +34,7 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   #Combine our vectors in a dataframe
   total <- cbind(prop$name, prop$description, geo_df)
   colnames(total) <- c("Name", "Address", "Lat", "Lon")
-  total <- distinct_at(total, vars(c(1, 2)), keep.all = TRUE)
+  total <- distinct_at(total, c(1, 2), .keep_all = TRUE)
   return(total)
 }
 
@@ -184,8 +184,6 @@ ui <- tagList(
 
 #Серверная часть приложения
 server <- function(input, output, session) {
-#Устанавливаем максимальный размер загружаемого файла равным 30 Мб
-  options(shiny.maxRequestSize = 30*1024^2)
   
 #Простановка кодов ОКТМО
   #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
@@ -276,18 +274,6 @@ server <- function(input, output, session) {
       )
     )
   })
-  #ru <- reactive({
-  #  input$coordru_line
- # })
- # ld <- reactive({
-  #  input$coordld_line
-  #})
-#  height <- reactive({
- #   input$num_line_h
-#  })
- # width <- reactive({
-  #  input$num_line_w
-#  })
   search_req <- reactive({
     input$search_line
   })
@@ -297,28 +283,18 @@ server <- function(input, output, session) {
   check_oktmo <- reactive({
     input$checkbox_oktmo
   })
-  search_areas <- reactive({
-    sa <- matrix(nrow = num, ncol = 4)
-    for (i in 1:num) {
-      sa[i, 1] <- input[[paste0("coordru_line", i)]]
-      sa[i, 2] <- input[[paste0("coordld_line", i)]]
-      sa[i, 3] <- input[[paste0("num_line_h", i)]]
-      sa[i, 4] <- input[[paste0("num_line_w", i)]]
-    }
-    return(sa)
-  })
-  #Разбиваем область поиска на блоки
-  coords <- reactive({
-    coords <- matrix()
-    for (i in 1:num) {
-      coords <- rbind(coords, make_grid(search_areas()[i, 1], search_areas()[i, 2], search_areas()[i, 3], search_areas()[i, 4]))
-    }
-  })
-  #Сохраняем результаты группы запросов в один датафрейм
+  #Сначала разбиваем область поиска на блоки.
+  #Затем сохраняем результаты группы запросов в один датафрейм
   result_ya <- eventReactive(input$Load_yandex_search, {
+    coords <- make_grid(input[[paste0("coordru_line", 1)]], input[[paste0("coordld_line", 1)]], input[[paste0("num_line_h", 1)]], input[[paste0("num_line_w", 1)]])
+    if (num > 1) {
+      for (i in seq_len(num)[-1]) {
+        coords <- rbind(coords, make_grid(input[[paste0("coordru_line", i)]], input[[paste0("coordld_line", i)]], input[[paste0("num_line_h", i)]], input[[paste0("num_line_w", i)]]))
+      }
+    }
     result <- data.frame()
-    for (i in 1:length(coords())) {
-      res <- yandex_geosearch_bb(search_req(), coords()[[i]], apikey())
+    for (i in 1:length(coords)) {
+      res <- yandex_geosearch_bb(search_req(), coords[i], apikey())
       result <- rbind(result, res)
       rm(res)
     }
