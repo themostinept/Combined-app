@@ -1,11 +1,13 @@
+options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 30*1024^2)
+
 library(shiny)
 library(shinythemes)
 library(tidyverse)
 library(maptools)
 library(jsonlite)
 library(openxlsx)
-library(xml2)
 library(curl)
+
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 yandex_geosearch_bb <- function(search_req, coords, apikey) {
   coords <- unlist(strsplit(trimws(coords), split = "_"))
@@ -30,8 +32,8 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   vec_geo <- unlist(geo$coordinates)
   geo_df <- data.frame(lat = vec_geo[seq(2,length(vec_geo), by = 2)], lon = vec_geo[seq(1,length(vec_geo), by = 2)])
   #Combine our vectors in a dataframe
-  total <- cbind(prop$name, prop$description, ifelse(is.null(prop$CompanyMetaData$url) == TRUE, rep(NA, length(prop$name)), prop$CompanyMetaData$url), geo_df)
-  colnames(total) <- c("Name", "Address", "URL", "Lat", "Lon")
+  total <- cbind(prop$name, prop$description, geo_df)
+  colnames(total) <- c("Name", "Address", "Lat", "Lon")
   return(total)
 }
 
@@ -128,11 +130,12 @@ ui <- tagList(
         hr(),
         textInput("search_line", label = h5("Введите запрос"), value = "Аптека"),
         textInput("key_line", label = h5("Введите api-ключ"), value = NA),
-        textInput("coordru_line", label = h5("Введите координаты области поиска: сначала верхнюю правую, затем нижнюю левую"), value = '58.622468, 31.406503'),
-        textInput("coordld_line", label = h5(), value = '58.461637, 31.118112'),
-        numericInput("num_line_h", label = h5("Укажите высоту разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
-        numericInput("num_line_w", label = h5("Укажите ширину разбивки области поиска"), value = 1, min = 1, max = 10, step = 1),
-        checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE)
+        checkboxInput("checkbox_oktmo", label = h5("Проверять координаты на попадание в границы региона"), value = FALSE),
+        p("Для каждой области поиска введите координаты: сначала верхнюю правую, затем нижнюю левую. После этого установите высоту и ширину
+          разбивки области поиска на прямоугольники."),
+        actionButton("add", "Добавить область"),
+        actionButton("remove", "Удалить область"),
+        div(id = "searcharea", style = "padding: 22px; border: 1px solid silver;")
       ),
         #Панель вывода результатов
       mainPanel(
@@ -180,8 +183,6 @@ ui <- tagList(
 
 #Серверная часть приложения
 server <- function(input, output, session) {
-#Устанавливаем максимальный размер загружаемого файла равным 30 Мб
-  options(shiny.maxRequestSize = 30*1024^2)
   
 #Простановка кодов ОКТМО
   #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
@@ -235,7 +236,7 @@ server <- function(input, output, session) {
     showModal(modalDialog("Проверяем координаты на попадание в границы"))
     m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
     points_polygon <- SpatialPoints(m, proj4string = crswgs84)
-    if (full_dataset() == F) {
+    if (full_dataset() == FALSE) {
       compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
     } else {
       compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
@@ -255,17 +256,32 @@ server <- function(input, output, session) {
 
 #API Яндекса для поиска организаций
   #Записываем входные параметры
-  ru <- reactive({
-    input$coordru_line
+  values <- reactiveValues(num_areas = 0)
+  observeEvent(input$add, ignoreNULL = FALSE, {
+    Sys.sleep(0.5)
+    values$num_areas <- values$num_areas + 1
+    num <<- values$num_areas
+    insertUI(
+      selector = "#searcharea", where = "beforeEnd",
+      fluidRow(
+        splitLayout(cellWidths = c("50%","50%"),
+                    textInput(paste0("coordru_line", num), label = h5(strong(paste0(num, ") Верхняя правая"))), value = '58.622468, 31.406503'),
+                    textInput(paste0("coordld_line", num), label = h5(strong("Нижняя левая")), value = '58.461637, 31.118112')),
+        splitLayout(cellWidths = c("50%","50%"),
+                    numericInput(paste0("num_line_h", num), label = h5("Высота разбивки"), value = 1, min = 1, max = 10, step = 1),
+                    numericInput(paste0("num_line_w", num), label = h5("Ширина разбивки"), value = 1, min = 1, max = 10, step = 1))
+      )
+    )
   })
-  ld <- reactive({
-    input$coordld_line
-  })
-  height <- reactive({
-    input$num_line_h
-  })
-  width <- reactive({
-    input$num_line_w
+  observeEvent(input$remove, {
+    Sys.sleep(0.5)
+    if (num > 1) {
+      removeUI(
+        selector = "div.row:last-child"
+      )
+      values$num_areas <- values$num_areas - 1
+      num <<- values$num_areas
+    }
   })
   search_req <- reactive({
     input$search_line
@@ -276,16 +292,22 @@ server <- function(input, output, session) {
   check_oktmo <- reactive({
     input$checkbox_oktmo
   })
-  #Разбиваем область поиска на блоки
-  coords <- reactive({make_grid(ru(), ld(), height(), width())})
-  #Сохраняем результаты группы запросов в один датафрейм
+  #Сначала разбиваем область поиска на блоки.
+  #Затем сохраняем результаты группы запросов в один датафрейм
   result_ya <- eventReactive(input$Load_yandex_search, {
+    coords <- make_grid(input[[paste0("coordru_line", 1)]], input[[paste0("coordld_line", 1)]], input[[paste0("num_line_h", 1)]], input[[paste0("num_line_w", 1)]])
+    if (num > 1) {
+      for (i in 2:num) {
+        coords <- rbind(coords, make_grid(input[[paste0("coordru_line", i)]], input[[paste0("coordld_line", i)]], input[[paste0("num_line_h", i)]], input[[paste0("num_line_w", i)]]))
+      }
+    }
     result <- data.frame()
-    for (i in 1:length(coords())) {
-      res <- yandex_geosearch_bb(search_req(), coords()[[i]], apikey())
+    for (i in 1:length(coords)) {
+      res <- yandex_geosearch_bb(search_req(), coords[i], apikey())
       result <- rbind(result, res)
       rm(res)
     }
+    result <- distinct_at(result, c(1, 2), .keep_all = TRUE)
   #Проверяем (или нет) координаты на попадание в границы и проставляем ОКТМО
     if (check_oktmo() == TRUE) {
       m <- matrix(c(result$Lon, result$Lat), ncol = 2)
