@@ -34,7 +34,6 @@ yandex_geosearch_bb <- function(search_req, coords, apikey) {
   #Combine our vectors in a dataframe
   total <- cbind(prop$name, prop$description, geo_df)
   colnames(total) <- c("Name", "Address", "Lat", "Lon")
-  total <- distinct_at(total, c(1, 2), .keep_all = TRUE)
   return(total)
 }
 
@@ -308,6 +307,7 @@ server <- function(input, output, session) {
       result <- rbind(result, res)
       rm(res)
     }
+    result <- distinct_at(result, c(1, 2), .keep_all = TRUE)
   #Проверяем (или нет) координаты на попадание в границы и проставляем ОКТМО
     if (check_oktmo() == TRUE) {
       m <- matrix(c(result$Lon, result$Lat), ncol = 2)
