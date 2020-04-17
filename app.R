@@ -7,6 +7,7 @@ library(maptools)
 library(jsonlite)
 library(openxlsx)
 library(curl)
+library(xml2)
 
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 yandex_geosearch_bb <- function(search_req, coords, apikey) {
@@ -124,7 +125,7 @@ ui <- tagList(
         fluidRow(column(4)),
         h4("На заметку*"),
         helpText("Для проверки результата запроса на попадание в границы региона и автоматического присвоения кодов ОКТМО,
-                 загрузите через меню вкладки 'Коды ОКТМО' и связанные с ним файлы.
+                 загрузите через меню вкладки 'Коды ОКТМО' shp и связанные с ним файлы.
                  Координаты должны передаваться в том же виде, в котором их выдают Яндекс-карты.
                  Высота и ширина области поиска подбираются интуитивно."),
         hr(),
