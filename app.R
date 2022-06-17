@@ -1,95 +1,16 @@
 options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 30*1024^2)
 
-library(shiny)
-library(shinythemes)
-library(tidyverse)
-library(maptools)
-library(jsonlite)
-library(openxlsx)
-library(curl)
+require(shiny)
+require(shinythemes)
+require(tidyverse)
+require(maptools)
+require(jsonlite)
+require(openxlsx)
+require(curl)
 
 crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
-yandex_geosearch_bb <- function(search_req, coords, apikey) {
-  coords <- unlist(strsplit(trimws(coords), split = "_"))
-  #First, prepare request phrase and convert coordinates from 'lat, lon' into 'lon, lat' format
-  request <- URLencode(enc2utf8(search_req))
-  coord1 <- unlist(strsplit(trimws(coords[1]), split = ","))
-  coord1 <- paste(coord1[2], coord1[1], sep = ",")
-  coord2 <- unlist(strsplit(trimws(coords[2]), split = ","))
-  coord2 <- paste(coord2[2], coord2[1], sep = ",")
-  #Combine a complete url for request  
-  first_part <- "https://search-maps.yandex.ru/v1/?apikey="
-  url_compl <- gsub(" ", "", paste(first_part, apikey, "&text=", request, "&type=biz&lang=ru_RU&", "bbox=", coord1, "~", coord2, "&results=500", collapse = ""))
-  #Obtain a request results in json format  
-  full_req <- suppressWarnings(fromJSON(paste(readLines(url_compl, encoding = 'UTF-8'), collapse="")))
-  #Desired results are stored in element, called 'feautures'. Here we take from there only name, address, url and coordinates of an object 
-  req_data <- full_req$features
-  if (length(req_data) < 1) {
-    return(NULL)
-  }
-  prop <- req_data$properties
-  geo <- req_data$geometry
-  vec_geo <- unlist(geo$coordinates)
-  geo_df <- data.frame(lat = vec_geo[seq(2,length(vec_geo), by = 2)], lon = vec_geo[seq(1,length(vec_geo), by = 2)])
-  #Combine our vectors in a dataframe
-  total <- cbind(prop$name, prop$description, geo_df)
-  colnames(total) <- c("Name", "Address", "Lat", "Lon")
-  return(total)
-}
-
-geo_find <- function(geocode, apikey, rspn, coord_left_low, coord_right_up) {
-  #Combine a complete url for request
-  geocode <- paste(unlist(strsplit(geocode, split = " ")), collapse = "+")
-  if (rspn == TRUE) {
-    coord1 <- unlist(strsplit(coord_left_low, split = ", "))
-    coord1 <- paste(coord1[2], coord1[1], sep = ",")
-    coord2 <- unlist(strsplit(coord_right_up, split = ", "))
-    coord2 <- paste(coord2[2], coord2[1], sep = ",")
-    url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), "&rspn=1", "&bbox=", coord1, "~", coord2, collapse = ""))
-  } else {
-    url <- gsub(" ", "", paste('https://geocode-maps.yandex.ru/1.x?apikey=', apikey, "&geocode=", curl_escape(iconv(geocode,"UTF-8")), collapse = ""))
-  }
-  result <- as_list(read_xml(url))
-  result_to_parse <- result$ymaps$GeoObjectCollection$featureMember$GeoObject$metaDataProperty$GeocoderMetaData
-  found_add <- unlist(lapply(list(result_to_parse$text,
-                                  result[["ymaps"]][["GeoObjectCollection"]][["featureMember"]][["GeoObject"]][["Point"]][["pos"]][[1]],
-                                  result_to_parse$kind,
-                                  result_to_parse$precision,
-                                  result_to_parse$AddressDetails$Country$CountryName,
-                                  result_to_parse$AddressDetails$Country$AdministrativeArea$AdministrativeAreaName,
-                                  result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$LocalityName,
-                                  result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$ThoroughfareName,
-                                  result_to_parse$AddressDetails$Country$AdministrativeArea$Locality$Thoroughfare$Premise$PremiseNumber), function(x) ifelse(is.null(x) == T, NA, x)))
-  return(found_add)
-}
-  
-make_grid <- function(ru, ld, height, width) {
-  if (height > 1 || width > 1) {
-    coord1 <- as.numeric(unlist(strsplit(trimws(ru), split = ",")))
-    coord2 <- as.numeric(unlist(strsplit(trimws(ld), split = ",")))
-    s1 <- seq(from = coord2[1], to = coord1[1], length.out = height + 1)
-    s2 <- seq(from = coord2[2], to = coord1[2], length.out = width + 1)
-    ss <- expand.grid(s1, s2)
-    ss <- ss %>% 
-      unite(col = coords, Var1, Var2, sep = ", ") %>% 
-      mutate(n = rep(1:(length(s1)), length(s2)))
-    coords <- matrix(nrow = width, ncol = height)
-    for(i in 1:max(ss[, 2])) {
-      if (i + 1 < max(ss[, 2]) + 1) {
-        lcv <- ss[which(ss[, 2] == i), 1]
-        lcv <- lcv[-length(lcv)]
-        rcv <- ss[which(ss[, 2] == (i + 1)), 1]
-        rcv <- rcv[-1]
-        n <- i
-        coords[, i] <- paste(lcv, rcv, sep = "_")
-      }
-    }
-    coords <- matrix(coords, ncol = 1)
-    } else {
-    coords <- paste(ld, ru, sep = "_")
-  }
-  return(coords)
-}
+source("ya_api_functions.R")
+source("make_grid_function.R")
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
@@ -192,24 +113,24 @@ server <- function(input, output, session) {
   #Чтение xlsx-файла и преобразование его координат в колонки с долготой и широтой  
   region_ds <- reactive({
     inFile <- input$xlsx_file
-    if (is.null(inFile) == T) {
+    if (is.null(inFile) == TRUE) {
       return(NULL)
     }
-    file.rename(inFile$datapath, paste(inFile$datapath, ".xlsx", sep=""))
+    file.rename(inFile$datapath, paste(inFile$datapath, ".xlsx", sep = ""))
     
-    region_dataset <- suppressWarnings(read.xlsx(paste(inFile$datapath, ".xlsx", sep = ""), sheet = 1, colNames = T, skipEmptyRows = F, skipEmptyCols = F) %>% 
-                                         separate(point, into = c("lon", "lat"), sep = "[[:space:]]", remove = F, convert = T) %>%  
+    region_dataset <- suppressWarnings(read.xlsx(paste(inFile$datapath, ".xlsx", sep = ""), sheet = 1, colNames = TRUE, skipEmptyRows = FALSE, skipEmptyCols = FALSE) %>% 
+                                         separate(point, into = c("lon", "lat"), sep = "[[:space:]]", remove = FALSE, convert = TRUE) %>%  
                                          mutate(lon = as.numeric(gsub(",", ".", lon)), lat = as.numeric(gsub(",", ".", lat))))
     return(region_dataset)  
   })
   #Проверка координат на корректность написания (если координаты некорректны, дальнейшее исполнение не имеет смысла)
   output$Dataset_check <- renderText({
     inFile <- input$xlsx_file
-    if (is.null(inFile) == T) {
+    if (is.null(inFile) == TRUE) {
       return(NULL)
     }
-    if (any(is.na(region_ds()$lon) == T) || any(is.na(region_ds()$lat) == T)) {
-      bad_rows <- unique(c(which(is.na(region_ds()$lon) == T), which(is.na(region_ds()$lat) == T)))
+    if (any(is.na(region_ds()$lon) == TRUE) || any(is.na(region_ds()$lat) == TRUE)) {
+      bad_rows <- unique(c(which(is.na(region_ds()$lon) == TRUE), which(is.na(region_ds()$lat) == TRUE)))
       print(paste("Incorrect coordinates in this rows:", paste(sort(bad_rows + 1), collapse = ", ")))
       } else {
         print("Correct coordinates.")
@@ -224,13 +145,13 @@ server <- function(input, output, session) {
     for (i in 1:nrow(shpdf)) {
       file.rename(shpdf$datapath[i], paste0(tempdirname, "/", shpdf$name[i]))
     }
-    region <- suppressWarnings(readShapePoly(paste(tempdirname, shpdf$name[grep(pattern = "*.shp$", shpdf$name)], sep = "/"), proj4string=crswgs84, verbose = TRUE, delete_null_obj = T))
+    region <- suppressWarnings(readShapePoly(paste(tempdirname, shpdf$name[grep(pattern = "*.shp$", shpdf$name)], sep = "/"), proj4string=crswgs84, verbose = TRUE, delete_null_obj = TRUE))
     region@data$NAME <- unlist(lapply(region@data$NAME, function(x) iconv(x, 'UTF-8')))
     return(region)
   })
   #Прогоняем датафрейм с координатами (предварительно превратив его в матрицу) по границам shp-файла и сохраняем результат
   result <- reactive({
-    if (is.null(map_shp) == T) {
+    if (is.null(map_shp) == TRUE) {
       return(NULL)
     }
     showModal(modalDialog("Проверяем координаты на попадание в границы"))
@@ -342,7 +263,7 @@ server <- function(input, output, session) {
     req(input$address_file)
     input_file <- input$address_file
     file.rename(input_file$datapath, paste(input_file$datapath, ".xlsx", sep=""))
-    to_geo <- read.xlsx(paste(input_file$datapath, ".xlsx", sep = ""), sheet = 1, colNames = T, skipEmptyRows = F, skipEmptyCols = F)
+    to_geo <- read.xlsx(paste(input_file$datapath, ".xlsx", sep = ""), sheet = 1, colNames = TRUE, skipEmptyRows = FALSE, skipEmptyCols = FALSE)
     return(to_geo)
   })
   geo_apikey <- reactive({
@@ -368,13 +289,14 @@ server <- function(input, output, session) {
     on.exit(progress$close())
     progress$set(message = "Ищем координату", value = 0)
     inc <- 0
-    geocode_result <- lapply(to_geo()[[input$select_col]], function(x) {
-                                                              res <- tryCatch(geo_find(x, rspn = rspn(), apikey = geo_apikey(), coord_left_low = ld_2(), coord_right_up = ru_2()),
-                                                              error = function(e) 'error')
-                                                              inc <<- inc + 1
-                                                              progress$inc(1 / nrow(to_geo()), detail = paste("Найдена", inc, "из", nrow(to_geo())))
-                                                              return(res)
-                                                           }
+    geocode_result <- lapply(to_geo()[[input$select_col]],
+                             function(x) {
+                              res <- tryCatch(yandex_geocode(x, rspn = rspn(), apikey = geo_apikey(), coord_left_low = ld_2(), coord_right_up = ru_2()),
+                              error = function(e) 'error')
+                              inc <<- inc + 1
+                              progress$inc(1 / nrow(to_geo()), detail = paste("Найдена", inc, "из", nrow(to_geo())))
+                              return(res)
+                             }
     )
     geocode_result <- as.data.frame(do.call(rbind, geocode_result))
     geocode_result <- cbind(to_geo()[[input$select_col]], geocode_result)
