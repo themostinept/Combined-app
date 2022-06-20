@@ -18,7 +18,7 @@
 /*.Rcheck/
 
 # RStudio files
-.Rproj.user/
+.Rproj
 
 # produced vignettes
 vignettes/*.html
@@ -39,6 +39,8 @@ vignettes/*.pdf
 .Renviron
 
 # xlsx test files
-.xlsx
+*.xlsx
 # test files directiries
-test/
+**test/**
+
+.Rproj.user

@@ -3,14 +3,17 @@ options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 30*1024^2)
 require(shiny)
 require(shinythemes)
 require(tidyverse)
-require(maptools)
 require(jsonlite)
 require(openxlsx)
 require(curl)
+require(sf)
+require(leaflet)
+require(RColorBrewer)
 
-crswgs84 <- CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
 source("ya_api_functions.R")
 source("make_grid_function.R")
+source("read_shp_module.R")
+source("point_over_map_function.R")
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
@@ -24,7 +27,7 @@ ui <- tagList(
                   В xlsx-файле обязательно должна присутствовать колонка 'point',
                   где координаты должны быть записаны в формате 'долгота широта' с пробелом между ними без каких-либо лишних знаков."),
         hr(),
-        fileInput("shp_file", label = h4("Выберите shp и сопутствующие ему файлы"), multiple = TRUE, accept = c(".shp", ".dbf", ".sbn", ".sbx", ".shx", ".prj")),
+        shp_input_UI("shp_file", label = h4("Выберите shp и сопутствующие ему файлы")),
         hr(),
         fluidRow(column(4)),
         fileInput("xlsx_file", label = h4("Выберите xlsx-файл"), accept = ".xlsx"),
@@ -99,6 +102,30 @@ ui <- tagList(
         tableOutput("Geocode_results")
       )
     )
+    # ),
+    # tabPanel(title = "Потоки",
+    #   sidebarPanel(
+    #     h4("На заметку*"),
+    #     helpText("Shp и связанные с ним файлы должны иметь одинаковые названия.
+    #     Содержимое и названия xlsx-файлов менять не следует."),
+    #     hr(),
+    #     fileInput("shp_file", label = h4("Выберите shp и сопутствующие ему файлы"), multiple = TRUE, accept = c(".shp", ".dbf", ".sbn", ".sbx", ".shx", ".prj")),
+    #     hr(),
+    #     fluidRow(column(4)),
+    #     fileInput("xlsx_file_flows", label = h4("Выберите xlsx-файлы"), multiple = TRUE, accept = ".xlsx"),
+    #     hr(),
+    #     fluidRow(column(4)),
+    #     selectInput("select_col_periods", label = h5("Укажите номер периода"),  choices = "", selected = 1, multiple = FALSE),
+    #     checkboxInput("checkbox", label = "Показать без карты", value = TRUE),
+    #     hr(),
+    #     fluidRow(column(3)),
+    #     downloadButton("Download", label = "Скачать файл потоков")
+    #   ),
+    #   #Панель вывода результатов (пока проверка координат на корректность написания)
+    #   mainPanel(
+    #     textOutput("Dataset_check")
+    #   )
+    # )
   )
 )
 
@@ -117,7 +144,6 @@ server <- function(input, output, session) {
       return(NULL)
     }
     file.rename(inFile$datapath, paste(inFile$datapath, ".xlsx", sep = ""))
-    
     region_dataset <- suppressWarnings(read.xlsx(paste(inFile$datapath, ".xlsx", sep = ""), sheet = 1, colNames = TRUE, skipEmptyRows = FALSE, skipEmptyCols = FALSE) %>% 
                                          separate(point, into = c("lon", "lat"), sep = "[[:space:]]", remove = FALSE, convert = TRUE) %>%  
                                          mutate(lon = as.numeric(gsub(",", ".", lon)), lat = as.numeric(gsub(",", ".", lat))))
@@ -138,30 +164,15 @@ server <- function(input, output, session) {
   })
   #Сначала переименуем shp и связанные с ним файлы, поскольку в shiny они автоматически переименовываются при импорте.
   #Затем ставим нужную кодировку атрибутам.
-  map_shp <- reactive({
-    req(input$shp_file)
-    shpdf <- input$shp_file
-    tempdirname <- dirname(shpdf$datapath[1])
-    for (i in 1:nrow(shpdf)) {
-      file.rename(shpdf$datapath[i], paste0(tempdirname, "/", shpdf$name[i]))
-    }
-    region <- suppressWarnings(readShapePoly(paste(tempdirname, shpdf$name[grep(pattern = "*.shp$", shpdf$name)], sep = "/"), proj4string=crswgs84, verbose = TRUE, delete_null_obj = TRUE))
-    region@data$NAME <- unlist(lapply(region@data$NAME, function(x) iconv(x, 'UTF-8')))
-    return(region)
-  })
+  map_shp <- shp_input_server("shp_file")
   #Прогоняем датафрейм с координатами (предварительно превратив его в матрицу) по границам shp-файла и сохраняем результат
   result <- reactive({
-    if (is.null(map_shp) == TRUE) {
+    if (is.null(map_shp()) == TRUE) {
       return(NULL)
     }
     showModal(modalDialog("Проверяем координаты на попадание в границы"))
-    m <- matrix(c(region_ds()$lon, region_ds()$lat), ncol = 2)
-    points_polygon <- SpatialPoints(m, proj4string = crswgs84)
-    if (full_dataset() == FALSE) {
-      compared <- cbind(region_ds()$point,(over(points_polygon, map_shp())))
-    } else {
-      compared <- cbind(region_ds(),(over(points_polygon, map_shp())))
-    }
+    compared <- point_over_map(input_df = region_ds(), var_lon = "lon", var_lat = "lat",
+                               map_over = map_shp(), full_result = full_dataset())
     removeModal()
     return(compared)
   })
@@ -181,27 +192,27 @@ server <- function(input, output, session) {
   observeEvent(input$add, ignoreNULL = FALSE, {
     Sys.sleep(0.5)
     values$num_areas <- values$num_areas + 1
-    num <<- values$num_areas
+    area_num <<- values$num_areas
     insertUI(
       selector = "#searcharea", where = "beforeEnd",
       fluidRow(
         splitLayout(cellWidths = c("50%","50%"),
-                    textInput(paste0("coordru_line", num), label = h5(strong(paste0(num, ") Верхняя правая"))), value = '58.622468, 31.406503'),
-                    textInput(paste0("coordld_line", num), label = h5(strong("Нижняя левая")), value = '58.461637, 31.118112')),
+                    textInput(paste0("coordru_line", area_num), label = h5(strong(paste0(area_num, ") Верхняя правая"))), value = '58.622468, 31.406503'),
+                    textInput(paste0("coordld_line", area_num), label = h5(strong("Нижняя левая")), value = '58.461637, 31.118112')),
         splitLayout(cellWidths = c("50%","50%"),
-                    numericInput(paste0("num_line_h", num), label = h5("Высота разбивки"), value = 1, min = 1, max = 10, step = 1),
-                    numericInput(paste0("num_line_w", num), label = h5("Ширина разбивки"), value = 1, min = 1, max = 10, step = 1))
+                    numericInput(paste0("num_line_h", area_num), label = h5("Высота разбивки"), value = 1, min = 1, max = 10, step = 1),
+                    numericInput(paste0("num_line_w", area_num), label = h5("Ширина разбивки"), value = 1, min = 1, max = 10, step = 1))
       )
     )
   })
   observeEvent(input$remove, {
     Sys.sleep(0.5)
-    if (num > 1) {
+    if (area_num > 1) {
       removeUI(
         selector = "div.row:last-child"
       )
       values$num_areas <- values$num_areas - 1
-      num <<- values$num_areas
+      area_num <<- values$num_areas
     }
   })
   search_req <- reactive({
@@ -217,8 +228,8 @@ server <- function(input, output, session) {
   #Затем сохраняем результаты группы запросов в один датафрейм
   result_ya <- eventReactive(input$Load_yandex_search, {
     coords <- make_grid(input[[paste0("coordru_line", 1)]], input[[paste0("coordld_line", 1)]], input[[paste0("num_line_h", 1)]], input[[paste0("num_line_w", 1)]])
-    if (num > 1) {
-      for (i in 2:num) {
+    if (area_num > 1) {
+      for (i in 2:area_num) {
         coords <- rbind(coords, make_grid(input[[paste0("coordru_line", i)]], input[[paste0("coordld_line", i)]], input[[paste0("num_line_h", i)]], input[[paste0("num_line_w", i)]]))
       }
     }
@@ -231,10 +242,8 @@ server <- function(input, output, session) {
     result <- distinct_at(result, c(1, 2), .keep_all = TRUE)
   #Проверяем (или нет) координаты на попадание в границы и проставляем ОКТМО
     if (check_oktmo() == TRUE) {
-      m <- matrix(c(result$Lon, result$Lat), ncol = 2)
-      points_polygon <- SpatialPoints(m, proj4string = crswgs84)
-      result <- cbind(result,(over(points_polygon, map_shp())))
-      result <- result[which(is.na(result[ ,ncol(result)]) == FALSE), ]
+      result <- point_over_map(input_df = result, var_lon = "Lon", var_lat = "Lat",
+                               map_over = map_shp())
       return(result)
     } else {
       return(result)
@@ -292,7 +301,7 @@ server <- function(input, output, session) {
     geocode_result <- lapply(to_geo()[[input$select_col]],
                              function(x) {
                               res <- tryCatch(yandex_geocode(x, rspn = rspn(), apikey = geo_apikey(), coord_left_low = ld_2(), coord_right_up = ru_2()),
-                              error = function(e) 'error')
+                                error = function(e) 'error')
                               inc <<- inc + 1
                               progress$inc(1 / nrow(to_geo()), detail = paste("Найдена", inc, "из", nrow(to_geo())))
                               return(res)
