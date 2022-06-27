@@ -17,6 +17,7 @@ source("point_over_map_function.R")
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
+  tags$style(type = "text/css", "#map {height: calc(100vh - 80px) !important;}"),
   navbarPage(
     theme = shinythemes::shinytheme("cerulean"),
     title = "Всякие приложения",
@@ -101,31 +102,35 @@ ui <- tagList(
         hr(),
         tableOutput("Geocode_results")
       )
+    ),
+    tabPanel(title = "Потоки",
+      leafletOutput("map", height = "100%", width = "100%"),
+      absolutePanel(
+        id = "controls", fixed = TRUE, draggable = TRUE, 
+        top = 60, left = "auto", right = 10, bottom = "auto", 
+        width = 330, height = "auto",
+        style = "background-color: rgba(205,205,205,0.7)",
+        h4("На заметку*"),
+        p("Shp и связанные с ним файлы должны иметь одинаковые названия.
+        Содержимое и названия xlsx-файлов менять не следует.",  align = "center"),
+        hr(),
+        shp_input_UI("shp_file_flows", label = h4("Выберите shp и сопутствующие ему файлы")),
+        hr(),
+        fluidRow(column(4)),
+        fileInput("xlsx_file_flows", label = h4("Выберите xlsx-файлы"), multiple = TRUE, accept = ".xlsx"),
+        hr(),
+        fluidRow(column(4)),
+        selectInput("select_col_periods", label = h4("Укажите номер периода"),  choices = "", selected = 1, multiple = FALSE),
+        checkboxInput("checkbox_map", label = "Показать без карты", value = TRUE),
+        hr(),
+        fluidRow(column(3)),
+        downloadButton("Download_flows", label = "Скачать файл потоков")
+      ),
+      #Панель вывода карты
+      # mainPanel(
+        
+      # )
     )
-    # ),
-    # tabPanel(title = "Потоки",
-    #   sidebarPanel(
-    #     h4("На заметку*"),
-    #     helpText("Shp и связанные с ним файлы должны иметь одинаковые названия.
-    #     Содержимое и названия xlsx-файлов менять не следует."),
-    #     hr(),
-    #     fileInput("shp_file", label = h4("Выберите shp и сопутствующие ему файлы"), multiple = TRUE, accept = c(".shp", ".dbf", ".sbn", ".sbx", ".shx", ".prj")),
-    #     hr(),
-    #     fluidRow(column(4)),
-    #     fileInput("xlsx_file_flows", label = h4("Выберите xlsx-файлы"), multiple = TRUE, accept = ".xlsx"),
-    #     hr(),
-    #     fluidRow(column(4)),
-    #     selectInput("select_col_periods", label = h5("Укажите номер периода"),  choices = "", selected = 1, multiple = FALSE),
-    #     checkboxInput("checkbox", label = "Показать без карты", value = TRUE),
-    #     hr(),
-    #     fluidRow(column(3)),
-    #     downloadButton("Download", label = "Скачать файл потоков")
-    #   ),
-    #   #Панель вывода результатов (пока проверка координат на корректность написания)
-    #   mainPanel(
-    #     textOutput("Dataset_check")
-    #   )
-    # )
   )
 )
 
@@ -230,7 +235,10 @@ server <- function(input, output, session) {
     coords <- make_grid(input[[paste0("coordru_line", 1)]], input[[paste0("coordld_line", 1)]], input[[paste0("num_line_h", 1)]], input[[paste0("num_line_w", 1)]])
     if (area_num > 1) {
       for (i in 2:area_num) {
-        coords <- rbind(coords, make_grid(input[[paste0("coordru_line", i)]], input[[paste0("coordld_line", i)]], input[[paste0("num_line_h", i)]], input[[paste0("num_line_w", i)]]))
+        coords <- rbind(coords, make_grid(input[[paste0("coordru_line", i)]],
+                                          input[[paste0("coordld_line", i)]],
+                                          input[[paste0("num_line_h", i)]],
+                                          input[[paste0("num_line_w", i)]]))
       }
     }
     result <- data.frame()
@@ -319,11 +327,29 @@ server <- function(input, output, session) {
   output$Download_yandex_geocode <- downloadHandler(
     filename <- function() {
       "Yandex_geocode.xlsx"
-  },
-  content <- function(file) {
-    write.xlsx(result_geo(), file)
-  }
- )
+    },
+    content <- function(file) {
+      write.xlsx(result_geo(), file)
+    }
+  )
+  
+  ##Просмотр потоков
+  map_flows <- shp_input_server("shp_file_flows")
+  output$map <- renderLeaflet({
+    leaflet() %>% 
+      addTiles() %>% 
+      setView(37.601147, 55.775249, zoom = 17)
+  })
+  observe({
+    req(map_flows())
+    b <- unname(st_bbox(map_flows()))
+    leafletProxy("map", data = map_flows()) %>%
+      addPolygons(fillOpacity = 0.4,
+                  fillColor = "lightblue",
+                  color = "black",
+                  weight = 1) %>% 
+      flyToBounds(lng1 = b[1], lat1 = b[2], lng2 = b[3], lat2 = b[4])
+  })
 }
 
 shinyApp(ui, server)
