@@ -17,7 +17,7 @@ source("ya_api_functions.R")
 source("make_grid_function.R")
 source("read_shp_module.R")
 source("point_over_map_function.R")
-source("plot_flows_functions.R")
+source("plot_flows_functions.R", encoding = "UTF-8")
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
