@@ -1,4 +1,4 @@
-options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 30*1024^2)
+options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 120*1024^2)
 
 require(shiny)
 require(shinythemes)
@@ -6,18 +6,22 @@ require(tidyverse)
 require(jsonlite)
 require(openxlsx)
 require(curl)
+require(xml2)
 require(sf)
 require(leaflet)
 require(RColorBrewer)
+require(memoise)
+require(cachem)
 
 source("ya_api_functions.R")
 source("make_grid_function.R")
 source("read_shp_module.R")
 source("point_over_map_function.R")
+source("plot_flows_functions.R")
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
-  tags$style(type = "text/css", "#map {height: calc(100vh - 80px) !important;}"),
+  tags$style(type = "text/css", "#map_flows {height: calc(100vh - 80px) !important;}"),
   navbarPage(
     theme = shinythemes::shinytheme("cerulean"),
     title = "Всякие приложения",
@@ -104,32 +108,28 @@ ui <- tagList(
       )
     ),
     tabPanel(title = "Потоки",
-      leafletOutput("map", height = "100%", width = "100%"),
+      #Панель вывода карты
+      leafletOutput("map_flows", height = "100%", width = "100%"),
       absolutePanel(
-        id = "controls", fixed = TRUE, draggable = TRUE, 
-        top = 60, left = "auto", right = 10, bottom = "auto", 
+        id = "controls", fixed = TRUE, draggable = TRUE,
+        top = 60, left = "auto", right = 10, bottom = "auto",
         width = 330, height = "auto",
         style = "background-color: rgba(205,205,205,0.7)",
         h4("На заметку*"),
         p("Shp и связанные с ним файлы должны иметь одинаковые названия.
         Содержимое и названия xlsx-файлов менять не следует.",  align = "center"),
         hr(),
-        shp_input_UI("shp_file_flows", label = h4("Выберите shp и сопутствующие ему файлы")),
+        shp_input_UI("shp_file_flows", label = h5("Выберите shp и сопутствующие ему файлы")),
         hr(),
         fluidRow(column(4)),
-        fileInput("xlsx_file_flows", label = h4("Выберите xlsx-файлы"), multiple = TRUE, accept = ".xlsx"),
-        hr(),
-        fluidRow(column(4)),
-        selectInput("select_col_periods", label = h4("Укажите номер периода"),  choices = "", selected = 1, multiple = FALSE),
-        checkboxInput("checkbox_map", label = "Показать без карты", value = TRUE),
+        fileInput("xlsx_file_flows", label = h5("Выберите xlsx-файлы"), multiple = TRUE, accept = ".xlsx"),
+        selectInput("select_col_periods", label = h5("Укажите номер периода"),  choices = "", selected = 1, multiple = FALSE),
+        checkboxInput("checkbox_aggregate", label = h5("Объединять источники по муниципальным образованиям"), value = TRUE),
+        textInput("zone_name", label = h5("Введите название группы зон"), value = "Зоны транспортирования"),
         hr(),
         fluidRow(column(3)),
         downloadButton("Download_flows", label = "Скачать файл потоков")
-      ),
-      #Панель вывода карты
-      # mainPanel(
-        
-      # )
+      )
     )
   )
 )
@@ -202,11 +202,19 @@ server <- function(input, output, session) {
       selector = "#searcharea", where = "beforeEnd",
       fluidRow(
         splitLayout(cellWidths = c("50%","50%"),
-                    textInput(paste0("coordru_line", area_num), label = h5(strong(paste0(area_num, ") Верхняя правая"))), value = '58.622468, 31.406503'),
-                    textInput(paste0("coordld_line", area_num), label = h5(strong("Нижняя левая")), value = '58.461637, 31.118112')),
+                    textInput(paste0("coordru_line", area_num),
+                              label = h5(strong(paste0(area_num, ") Верхняя правая"))),
+                              value = '58.622468, 31.406503'),
+                    textInput(paste0("coordld_line", area_num),
+                              label = h5(strong("Нижняя левая")),
+                              value = '58.461637, 31.118112')),
         splitLayout(cellWidths = c("50%","50%"),
-                    numericInput(paste0("num_line_h", area_num), label = h5("Высота разбивки"), value = 1, min = 1, max = 10, step = 1),
-                    numericInput(paste0("num_line_w", area_num), label = h5("Ширина разбивки"), value = 1, min = 1, max = 10, step = 1))
+                    numericInput(paste0("num_line_h", area_num),
+                                 label = h5("Высота разбивки"),
+                                 value = 1, min = 1, max = 10, step = 1),
+                    numericInput(paste0("num_line_w", area_num),
+                                 label = h5("Ширина разбивки"),
+                                 value = 1, min = 1, max = 10, step = 1))
       )
     )
   })
@@ -250,8 +258,7 @@ server <- function(input, output, session) {
     result <- distinct_at(result, c(1, 2), .keep_all = TRUE)
   #Проверяем (или нет) координаты на попадание в границы и проставляем ОКТМО
     if (check_oktmo() == TRUE) {
-      result <- point_over_map(input_df = result, var_lon = "Lon", var_lat = "Lat",
-                               map_over = map_shp())
+      result <- point_over_map(input_df = result, var_lon = "Lon", var_lat = "Lat", map_over = map_shp())
       return(result)
     } else {
       return(result)
@@ -334,21 +341,59 @@ server <- function(input, output, session) {
   )
   
   ##Просмотр потоков
-  map_flows <- shp_input_server("shp_file_flows")
-  output$map <- renderLeaflet({
-    leaflet() %>% 
-      addTiles() %>% 
+  map_base <- shp_input_server("shp_file_flows")
+  output$map_flows <- renderLeaflet({
+    leaflet() %>%
+      addTiles() %>%
       setView(37.601147, 55.775249, zoom = 17)
   })
+  #Читаем список названий xlsx-файлов и переименовываем их
+  #Затем читаем сами файлы
+  debug_data <- reactive({
+    req(input$xlsx_file_flows, map_base())
+    debug_files <- input$xlsx_file_flows
+    tempdirname <- dirname(debug_files$datapath[1])
+    for (i in 1:nrow(debug_files)) {
+      file.rename(debug_files$datapath[i], paste0(tempdirname, "/", debug_files$name[i]))
+    }
+    updateSelectInput(session = session, 
+                      inputId = "select_col_periods", 
+                      choices = as.numeric(unlist(str_extract_all(debug_files$name, "[[:digit:]]"))))
+    parsed_files <- paste0(tempdirname, "/", debug_files$name)
+    inc <<- 0
+    progress <<- Progress$new()
+    on.exit(progress$close())
+    progress$set(message = "Обработка файлов", value = 0)
+    debug_files <- get_flows_df(flows_files = parsed_files,
+                                         region = map_base(),
+                                         zone_name = input$zone_name)
+    return(debug_files)
+  })
   observe({
-    req(map_flows())
-    b <- unname(st_bbox(map_flows()))
-    leafletProxy("map", data = map_flows()) %>%
+    req(map_base(), debug_data()) 
+    b <- unname(st_bbox(map_base()))
+    leafletProxy("map_flows", data = map_base()) %>%
       addPolygons(fillOpacity = 0.4,
                   fillColor = "lightblue",
                   color = "black",
-                  weight = 1) %>% 
+                  weight = 1) %>%
       flyToBounds(lng1 = b[1], lat1 = b[2], lng2 = b[3], lat2 = b[4])
+  })
+  # Ставим цвета потокам и выводим потоки на экран
+  flow_col <- reactive({
+    req(debug_data())
+    cf <- colorFactor(palette = "Set1", domain = unique(debug_data()$flows_aggr$output_treat_name))
+    Sys.sleep(2)
+    return(cf)
+  })
+  observeEvent(input$select_col_periods, ignoreNULL = TRUE, {
+    req(flow_col())
+    get_flows_period(flows_result = debug_data(),
+                     flow_map = map_base(),
+                     flow_col = flow_col(),
+                     set_period = input$select_col_periods,
+                     show_aggregated_flows = input$checkbox_aggregate,
+                     leafletmap_name = "map_flows")
   })
 }
 
