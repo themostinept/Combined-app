@@ -356,9 +356,9 @@ server <- function(input, output, session) {
     for (i in 1:nrow(debug_files)) {
       file.rename(debug_files$datapath[i], paste0(tempdirname, "/", debug_files$name[i]))
     }
-    updateSelectInput(session = session, 
-                      inputId = "select_col_periods", 
-                      choices = as.numeric(unlist(str_extract_all(debug_files$name, "[[:digit:]]"))))
+    # updateSelectInput(session = session, 
+    #                   inputId = "select_col_periods", 
+    #                   choices = as.numeric(unlist(str_extract_all(debug_files$name, "[[:digit:]]"))))
     parsed_files <- paste0(tempdirname, "/", debug_files$name)
     inc <<- 0
     progress <<- Progress$new()
@@ -370,13 +370,17 @@ server <- function(input, output, session) {
     return(debug_files)
   })
   observe({
-    req(map_base(), debug_data()) 
+    req(map_base(), debug_data())
+    updateSelectInput(session = session, 
+                      inputId = "select_col_periods", 
+                      choices = as.numeric(unlist(str_extract_all(debug_data()$periods, "[[:digit:]]"))))
     b <- unname(st_bbox(map_base()))
     leafletProxy("map_flows", data = map_base()) %>%
       addPolygons(fillOpacity = 0.4,
                   fillColor = "lightblue",
                   color = "black",
                   weight = 1) %>%
+      addScaleBar(position = "bottomleft") %>% 
       flyToBounds(lng1 = b[1], lat1 = b[2], lng2 = b[3], lat2 = b[4])
   })
   # Ставим цвета потокам и выводим потоки на экран
@@ -395,6 +399,15 @@ server <- function(input, output, session) {
                      show_aggregated_flows = input$checkbox_aggregate,
                      leafletmap_name = "map_flows")
   })
+  output$Download_flows <- downloadHandler(
+    filename <- function() {
+      "mw_flows.xlsx"
+    },
+    content <- function(file) {
+      out_xlsx <- st_drop_geometry(debug_data()$flows_aggr)
+      write.xlsx(out_xlsx, file)
+    }
+  )
 }
 
 shinyApp(ui, server)

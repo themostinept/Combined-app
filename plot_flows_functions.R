@@ -1,7 +1,8 @@
 ##Function to parse debug-files
 get_flows_df <- function(flows_files, region, zone_name = "Зоны транспортирования") {
   #prepare flow files
-  periods <- as.numeric(unlist(str_extract_all(flows_files, "[[:digit:]]")))
+  periods <- unlist(str_extract_all(flows_files, "period-[[:digit:]].debug"))
+  periods <- as.numeric(unlist(str_extract_all(periods, "[[:digit:]]")))
   flow_df_list <- list()
   infs <- data.frame()
   sources <- data.frame()
@@ -14,14 +15,16 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
     # print(paste0("Period ", periods[i], ": ", start_time))
     wb_names <- getSheetNames(flows_files[i])
     ##Infrastructure dataframe
+    progress$set(detail = "Обработка объектов")
     infs_temp <- read.xlsx(flows_files[i], sheet = wb_names[grepl("Объекты", wb_names)])
     infs_temp <- infs_temp %>% 
       filter(node_type == "input") %>% 
-      select(c(3, 7, 10, 11, 12, 19, 20)) %>% 
+      select(c(3, 7, 10:12, 20:21)) %>% 
       mutate(period = periods[i],
              point = st_as_sfc(point))
     infs_temp <- st_sf(infs_temp)
     ##Sources dataframe
+    progress$set(detail = "Обработка источников")
     sources_temp <- read.xlsx(flows_files[i], sheet = "Источники")
     sources_temp <- sources_temp %>% 
       select(c(1:3, 6:7)) %>% 
@@ -29,6 +32,7 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
              point = st_as_sfc(point))
     sources_temp <- st_sf(sources_temp)
     ##Flows
+    progress$set(detail = "Обработка потоков")
     flows_ln <- wb_names[grepl("Потоки", wb_names)]
     flows_temp <- data.frame()
     for (j in seq_along(flows_ln)) {
@@ -48,12 +52,14 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
       filter(!(dup == 2 & row_n == 1)) %>% 
       select(-c(row_n, dup, end_type, start_type))
     ##Edges. Just tt_types dictionary for now
+    # progress$set(detail = "Обработка ребер")
     # edges <- read.xlsx(flows_files[i], sheet = "Ребра")
     # tt_type <- edges %>% 
     #   select(treat_id, output_treat_name) %>% 
     #   distinct() %>% 
     #   filter(is.na(treat_id) == FALSE)
     ##Transport zones
+    progress$set(detail = "Обработка групп зон и территорий")
     zones_temp <- read.xlsx(flows_files[i], sheet = "Зоны")
     chars <- which(sapply(zones_temp, class) == "character")
     zones_temp[ , chars] <- lapply(zones_temp[ , chars], `Encoding<-`, 'UTF-8')
@@ -164,7 +170,7 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
   
   ##return result list
   flow_df_list <- list("infs" = infs, "sources" = sources, "flows" = flows, "flows_aggr" = flows_aggregated,
-                       "zones" = zones, "infs_types" = infs_types, "region" = region)
+                       "zones" = zones, "infs_types" = infs_types, "region" = region, "periods" = periods)
   gc()
   return(flow_df_list)
 }
@@ -218,14 +224,15 @@ get_flows_period <- function(flows_result, flow_map, set_period, flow_col, show_
   
   ##Plot a map
   flow_map <- leafletProxy(map = leafletmap_name) %>% 
-    # removeShape(map = flow_map) %>%
+    clearShapes() %>%
+    clearMarkers() %>% 
+    removeControl(layerId = "infs_legend") %>% 
     addPolygons(data = region_filt,
                 popup = region_filt$popup,
                 fillColor = region_col(region_filt$ID.зоны),
                 fillOpacity = 0.6,
                 color = "black",
                 weight = 1) %>%
-    addScaleBar(position = "bottomleft") %>%
     addAwesomeMarkers(data = infs_filt,
                       popup = infs_filt$popup,
                       icon = awesomeIcons(icon = "map-marker",
@@ -234,7 +241,8 @@ get_flows_period <- function(flows_result, flow_map, set_period, flow_col, show_
                       group = "object_types") %>%
     addLegend(colors = infs_types$clr,
               labels = infs_types$Тип.объекта,
-              group = "object_types")
+              group = "object_types",
+              layerId = "infs_legend")
   
   for (i in seq_along(sources_filt_removed)) {
     sources_removed_temp <- sources_filt_removed[[i]]
