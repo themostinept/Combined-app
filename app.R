@@ -22,7 +22,7 @@ source("plot_flows_functions.R", encoding = "UTF-8")
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
-  tags$style(type = "text/css", "#map_flows {height: calc(100vh - 80px) !important;}"),
+  tags$style(type = "text/css", "#map_flows {height: calc(100vh - 53px) !important;}"),
   navbarPage(
     theme = shinythemes::shinytheme("cerulean"),
     title = "Всякие приложения",
@@ -111,6 +111,11 @@ ui <- tagList(
     tabPanel(title = "Потоки",
       #Панель вывода карты
       leafletOutput("map_flows", height = "100%", width = "100%"),
+      tags$style(type = "text/css", ".container-fluid {padding-left:0px;
+                    padding-right:0px; padding-top:0px}"),
+      tags$style(type = "text/css", ".container-fluid .navbar-header 
+                                    .navbar-brand {margin-left: 0px;}"),
+      tags$style(type = "text/css", ".navbar {margin-bottom: .5px;}"),
       absolutePanel(
         id = "controls", fixed = TRUE, draggable = TRUE,
         top = 60, left = "auto", right = 10, bottom = "auto",
