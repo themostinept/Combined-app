@@ -1,15 +1,5 @@
 options(shiny.sanitize.errors = FALSE, shiny.maxRequestSize = 120*1024^2)
 
-<<<<<<< HEAD
-library(shiny)
-library(shinythemes)
-library(tidyverse)
-library(maptools)
-library(jsonlite)
-library(openxlsx)
-library(curl)
-library(xml2)
-=======
 require(shiny)
 require(shinythemes)
 require(tidyverse)
@@ -22,7 +12,7 @@ require(leaflet)
 require(RColorBrewer)
 require(memoise)
 require(cachem)
->>>>>>> development
+
 
 source("ya_api_functions.R")
 source("make_grid_function.R")
