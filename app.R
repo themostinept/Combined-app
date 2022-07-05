@@ -356,9 +356,6 @@ server <- function(input, output, session) {
     for (i in 1:nrow(debug_files)) {
       file.rename(debug_files$datapath[i], paste0(tempdirname, "/", debug_files$name[i]))
     }
-    # updateSelectInput(session = session, 
-    #                   inputId = "select_col_periods", 
-    #                   choices = as.numeric(unlist(str_extract_all(debug_files$name, "[[:digit:]]"))))
     parsed_files <- paste0(tempdirname, "/", debug_files$name)
     inc <<- 0
     progress <<- Progress$new()
@@ -399,13 +396,24 @@ server <- function(input, output, session) {
                      show_aggregated_flows = input$checkbox_aggregate,
                      leafletmap_name = "map_flows")
   })
+  
   output$Download_flows <- downloadHandler(
     filename <- function() {
       "mw_flows.xlsx"
     },
     content <- function(file) {
-      out_xlsx <- st_drop_geometry(debug_data()$flows_aggr)
-      write.xlsx(out_xlsx, file)
+      out_xlsx <- st_drop_geometry(debug_data()$flows_aggr) %>% 
+        select(-c(original_id, treatment_type, treat_id))
+      out_xlsx_long <- st_drop_geometry(debug_data()$flows) %>% 
+        select(-c(original_id, treatment_type, treat_id))
+      out_xlsx_names <- c("ID начальной точки", "ID конечной точки", "Масса, тонн",
+                          "Длина потока, км.", "Объем, куб. м", "Тип обращения",
+                          "Период", "Тип потока", "ID административной территории",
+                          "Начальная точка", "Конечная точка")
+      colnames(out_xlsx) <- out_xlsx_names
+      colnames(out_xlsx_long) <- out_xlsx_names
+      write.xlsx(list("Потоки от территорий" = out_xlsx, 
+                      "Потоки от источников" = out_xlsx_long), file)
     }
   )
 }

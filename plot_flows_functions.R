@@ -9,6 +9,7 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
   flows <- data.frame()
   # tt_types <- data.frame()
   zones <- data.frame()
+  region_column <- colnames(region)[grepl("name", colnames(region), ignore.case = TRUE)]
   for (i in seq_along(flows_files)) {
     progress$set(message = paste("Обработка файла номер", i))
     # start_time <- Sys.time()
@@ -93,8 +94,9 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
                                   by = c("id" = "ID.выделленой.территории")))
   region <- st_join(region, distinct(select(sources_terr, c(3, 5:6, 8)),
                                      across(c(1:3)), 
-                                     .keep_all = TRUE)) %>% 
-    mutate(popup = paste(paste0("<b>", LOCNAME, "</b>"),
+                                     .keep_all = TRUE))
+  region <- region %>% 
+    mutate(popup = paste(paste0("<b>", region[[region_column]], "</b>"),
                          `ID.административной.территори`,
                          OKTMO,
                          `Название.зоны`, sep = "<br/>"))
