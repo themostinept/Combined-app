@@ -23,8 +23,7 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
       select(c(3, 7, 10:12, 20:21)) %>% 
       mutate(period = periods[i],
              point = st_as_sfc(point))
-    infs_temp <- st_sf(infs_temp) %>% 
-      st_set_crs(4326)
+    infs_temp <- st_sf(infs_temp, crs = 4326)
     ##Sources dataframe
     progress$set(detail = "Обработка источников")
     sources_temp <- read.xlsx(flows_files[i], sheet = "Источники")
@@ -32,8 +31,7 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
       select(c(1:3, 6:7)) %>% 
       mutate(period = periods[i],
              point = st_as_sfc(point))
-    sources_temp <- st_sf(sources_temp) %>% 
-      st_set_crs(4326)
+    sources_temp <- st_sf(sources_temp, crs = 4326)
     ##Flows
     progress$set(detail = "Обработка потоков")
     flows_ln <- wb_names[grepl("Потоки", wb_names)]
