@@ -21,17 +21,13 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
     infs_temp <- infs_temp %>% 
       filter(node_type == "input") %>% 
       select(c(3, 7, 10:12, 20:21)) %>% 
-      mutate(period = periods[i],
-             point = st_as_sfc(point))
-    infs_temp <- st_sf(infs_temp, crs = 4326)
+      mutate(period = periods[i])
     ##Sources dataframe
     progress$set(detail = "Обработка источников")
     sources_temp <- read.xlsx(flows_files[i], sheet = "Источники")
     sources_temp <- sources_temp %>% 
       select(c(1:3, 6:7)) %>% 
-      mutate(period = periods[i],
-             point = st_as_sfc(point))
-    sources_temp <- st_sf(sources_temp, crs = 4326)
+      mutate(period = periods[i])
     ##Flows
     progress$set(detail = "Обработка потоков")
     flows_ln <- wb_names[grepl("Потоки", wb_names)]
@@ -74,9 +70,12 @@ get_flows_df <- function(flows_files, region, zone_name = "Зоны трансп
     zones_temp <- left_join(dedicated_terr_temp, zones_temp,
                             by = "ID.административной.территори")
     ##Combine into bigger dataframes
-    infs <- rbind(infs, infs_temp)
-    sources <- rbind(sources, sources_temp)
-    flows <- rbind(flows, flows_temp)
+    infs <- bind_rows(infs, infs_temp) %>% 
+      mutate(point = st_as_sfc(point))
+    infs <- st_sf(infs, crs = 4326)
+    sources <- bind_rows(sources, sources_temp) %>% 
+      mutate(point = st_as_sfc(point))
+    sources <- st_sf(sources, crs = 4326)
     # tt_types <- rbind(tt_types, tt_type)
     zones <- rbind(zones, zones_temp)
     ##set progress bar for shiny app
