@@ -18,6 +18,7 @@ source("make_grid_function.R")
 source("read_shp_module.R")
 source("point_over_map_function.R")
 source("plot_flows_functions.R", encoding = "UTF-8")
+sf_use_s2(FALSE)
 
 #Элементы пользовательского интерфейса
 ui <- tagList(
