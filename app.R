@@ -17,12 +17,18 @@ source("ya_api_functions.R")
 source("make_grid_function.R")
 source("read_shp_module.R")
 source("point_over_map_function.R")
-source("plot_flows_functions.R", encoding = "UTF-8")
+source("lonlat2UTM.R")
+source("parsing_files_for_merging.R")
 sf_use_s2(FALSE)
 
-#Элементы пользовательского интерфейса
+# Элементы пользовательского интерфейса
 ui <- tagList(
-  tags$style(type = "text/css", "#map_flows {height: calc(100vh - 53px) !important;}"),
+  tags$style(HTML(".shiny-notification {
+              position:fixed;
+              top: calc(50%);
+              left: calc(50%);
+              }")
+  ),
   navbarPage(
     theme = shinythemes::shinytheme("cerulean"),
     title = "Всякие приложения",
@@ -84,7 +90,7 @@ ui <- tagList(
         fluidRow(column(4)),
         h4("На заметку*"),
         helpText("Файл с адресами может содержать любое количество столбцов с любыми названиями. Главное - выбрать нужный.
-        Результат геокодирования сильно зависит от корректности написания адреса и от наличия в нем посторонней информации."),
+                Результат геокодирования сильно зависит от корректности написания адреса и от наличия в нем посторонней информации."),
         hr(),
         fileInput("address_file", label = h5("Выберите xlsx-файл"), accept = ".xlsx"),
         hr(),
@@ -108,47 +114,46 @@ ui <- tagList(
         tableOutput("Geocode_results")
       )
     ),
-    tabPanel(title = "Потоки",
-      #Панель вывода карты
-      leafletOutput("map_flows", height = "100%", width = "100%"),
-      tags$style(type = "text/css", ".container-fluid {padding-left:0px;
-                    padding-right:0px; padding-top:0px}"),
-      tags$style(type = "text/css", ".container-fluid .navbar-header 
-                                    .navbar-brand {margin-left: 0px;}"),
-      tags$style(type = "text/css", ".navbar {margin-bottom: .5px;}"),
-      absolutePanel(
-        id = "controls", fixed = TRUE, draggable = TRUE,
-        top = 60, left = "auto", right = 10, bottom = "auto",
-        width = 330, height = "auto",
-        style = "background-color: rgba(205,205,205,0.7)",
+    tabPanel(title = "Объединение списков",
+      sidebarPanel(
         h4("На заметку*"),
-        p("Shp и связанные с ним файлы должны иметь одинаковые названия.
-        Содержимое и названия xlsx-файлов менять не следует.",  align = "center"),
+        helpText("Shp и связанные с ним файлы должны иметь одинаковые названия.
+                  В xlsx-файлах обязательно должна присутствовать колонка 'point',
+                  где координаты должны быть записаны в формате 'долгота широта' с пробелом между ними без каких-либо лишних знаков.
+                  Также должны быть колонки 'id', где записаны уникальные id записей, и 
+                  'dist', где указано расстояние в метрах, в пределах которого может быть
+                  привязана точка из другого списка.
+                  Для записей, у которых отсутствует значение dist, будет проставлено расстояние из настройки ниже.
+                  Если не выбран основной файл, то основнным будет считаться наибольший по числу записей.
+                  Если выключен параметр 'Учитывать совпадающие атрибуты', то объединение будет производиться исключительно по степени близости"),
         hr(),
-        shp_input_UI("shp_file_flows", label = h5("Выберите shp и сопутствующие ему файлы")),
+        shp_input_UI("shp_file_2", label = h4("Выберите shp и сопутствующие ему файлы")),
         hr(),
-        fluidRow(column(4)),
-        fileInput("xlsx_file_flows", label = h5("Выберите xlsx-файлы"), multiple = TRUE, accept = ".xlsx"),
-        selectInput("select_col_periods", label = h5("Укажите номер периода"),  choices = "", selected = 1, multiple = FALSE),
-        checkboxInput("checkbox_aggregate", label = h5("Объединять источники по муниципальным образованиям"), value = TRUE),
-        textInput("zone_name", label = h5("Введите название группы зон"), value = "Зоны транспортирования"),
+        fileInput("xlsx_files", label = h4("Выберите xlsx-файлы"), accept = ".xlsx", multiple = TRUE),
         hr(),
+        selectInput("select_master_set", label = h5("Укажите основной файл для сравнения (опционально)"),  choices = "", selected = NULL, multiple = FALSE),
+        checkboxInput("check_attributes", label = "Учитывать совпадающие атрибуты", value = TRUE),
+        hr(),
+        numericInput("max_distance", label = h5("Максимальный радиус объединения (в метрах)"), value = 25, min = 1, max = 500, step = 1),
         fluidRow(column(3)),
-        downloadButton("Download_flows", label = "Скачать файл потоков")
+        downloadButton("Download_merging", label = "Получить файл")
+      ),
+        #Панель вывода результатов
+      mainPanel(
+        textOutput("Check input")
       )
     )
   )
 )
 
-#Серверная часть приложения
+# Серверная часть приложения
 server <- function(input, output, session) {
-  
-#Простановка кодов ОКТМО
-  #Чекбокс для вывода полного или урезанного (только координаты и результат) файла
+# Простановка кодов ОКТМО-------------------------------------------------------
+# Чекбокс для вывода полного или урезанного (только координаты и результат) файла
   full_dataset <- reactive({
     input$checkbox
   })
-  #Чтение xlsx-файла и преобразование его координат в колонки с долготой и широтой  
+# Чтение xlsx-файла и преобразование его координат в колонки с долготой и широтой  
   region_ds <- reactive({
     inFile <- input$xlsx_file
     if (is.null(inFile) == TRUE) {
@@ -158,36 +163,53 @@ server <- function(input, output, session) {
     region_dataset <- suppressWarnings(read.xlsx(paste(inFile$datapath, ".xlsx", sep = ""), sheet = 1, colNames = TRUE, skipEmptyRows = FALSE, skipEmptyCols = FALSE) %>% 
                                          separate(point, into = c("lon", "lat"), sep = "[[:space:]]", remove = FALSE, convert = TRUE) %>%  
                                          mutate(lon = as.numeric(gsub(",", ".", lon)), lat = as.numeric(gsub(",", ".", lat))))
-    return(region_dataset)  
+    return(region_dataset)
   })
-  #Проверка координат на корректность написания (если координаты некорректны, дальнейшее исполнение не имеет смысла)
+# Проверка координат на корректность написания (если координаты некорректны, дальнейшее исполнение не имеет смысла)
   output$Dataset_check <- renderText({
     inFile <- input$xlsx_file
     if (is.null(inFile) == TRUE) {
       return(NULL)
-    }
-    if (any(is.na(region_ds()$lon) == TRUE) || any(is.na(region_ds()$lat) == TRUE)) {
-      bad_rows <- unique(c(which(is.na(region_ds()$lon) == TRUE), which(is.na(region_ds()$lat) == TRUE)))
-      print(paste("Incorrect coordinates in this rows:", paste(sort(bad_rows + 1), collapse = ", ")))
+    } else {
+      showModal(modalDialog("Проверяем координаты из файла"))
+      if (any(is.na(region_ds()$lon) == TRUE) || any(is.na(region_ds()$lat) == TRUE)) {
+        bad_rows <- unique(c(which(is.na(region_ds()$lon) == TRUE), which(is.na(region_ds()$lat) == TRUE)))
+        removeModal()
+        print(paste("Incorrect coordinates in this rows:", paste(sort(bad_rows + 1), collapse = ", ")))
       } else {
+        removeModal()
         print("Correct coordinates.")
+      }
     }
   })
-  #Сначала переименуем shp и связанные с ним файлы, поскольку в shiny они автоматически переименовываются при импорте.
-  #Затем ставим нужную кодировку атрибутам.
+# Сначала переименуем shp и связанные с ним файлы, поскольку в shiny они автоматически переименовываются при импорте.
+# Затем ставим нужную кодировку атрибутам.
   map_shp <- shp_input_server("shp_file")
-  #Прогоняем датафрейм с координатами (предварительно превратив его в матрицу) по границам shp-файла и сохраняем результат
+# Прогоняем датафрейм с координатами (предварительно превратив его в матрицу) по границам shp-файла и сохраняем результат
   result <- reactive({
-    if (is.null(map_shp()) == TRUE) {
+    if (is.null(map_shp())) {
       return(NULL)
     }
     showModal(modalDialog("Проверяем координаты на попадание в границы"))
-    compared <- point_over_map(input_df = region_ds(), var_lon = "lon", var_lat = "lat",
-                               map_over = map_shp(), full_result = full_dataset())
+    compared <- tryCatch(point_over_map(
+        input_df = region_ds(), var_lon = "lon", var_lat = "lat",
+        map_over = map_shp(), full_result = full_dataset()
+    ), error = function(e) {
+        removeModal()
+        showNotification("Possibly invalid geometry of polygons! Returning an empty file!", 
+                         type = "error", duration = 15
+                         )
+        return(NULL)
+      }
+    )
     removeModal()
+    if (is.null(compared)) {
+      empty_df <- data.frame()
+      return(empty_df)
+    }
     return(compared)
   })
-  #Вывод результата в формате xlsx через кнопку загрузки
+# Вывод результата в формате xlsx через кнопку загрузки
   output$Download <- downloadHandler(
     filename <- function() {
       "Comparison.xlsx"
@@ -197,8 +219,8 @@ server <- function(input, output, session) {
     }
   )
 
-#API Яндекса для поиска организаций
-  #Записываем входные параметры
+# API Яндекса для поиска организаций--------------------------------------------
+# Записываем входные параметры
   values <- reactiveValues(num_areas = 0)
   observeEvent(input$add, ignoreNULL = FALSE, {
     Sys.sleep(0.5)
@@ -243,8 +265,8 @@ server <- function(input, output, session) {
   check_oktmo <- reactive({
     input$checkbox_oktmo
   })
-  #Сначала разбиваем область поиска на блоки.
-  #Затем сохраняем результаты группы запросов в один датафрейм
+# Сначала разбиваем область поиска на блоки.
+# Затем сохраняем результаты группы запросов в один датафрейм
   result_ya <- eventReactive(input$Load_yandex_search, {
     coords <- make_grid(input[[paste0("coordru_line", 1)]], input[[paste0("coordld_line", 1)]], input[[paste0("num_line_h", 1)]], input[[paste0("num_line_w", 1)]])
     if (area_num > 1) {
@@ -262,22 +284,24 @@ server <- function(input, output, session) {
       rm(res)
     }
     result <- distinct_at(result, c(1, 2), .keep_all = TRUE)
-  #Проверяем (или нет) координаты на попадание в границы и проставляем ОКТМО
+# Проверяем (или нет) координаты на попадание в границы и проставляем ОКТМО
     if (check_oktmo() == TRUE) {
-      result <- point_over_map(input_df = result, var_lon = "Lon", var_lat = "Lat", map_over = map_shp())
+      result <- point_over_map(
+          input_df = result, var_lon = "Lon", var_lat = "Lat", map_over = map_shp()
+      )
       return(result)
     } else {
       return(result)
     }
   })
-  #Вывод таблицы с результатами
+# Вывод таблицы с результатами
   output$Result_check <- renderText({
     print(paste("Всего найдено ", nrow(result_ya()), " организаций по запросу.", sep = ""))
   })
   output$ya_table <- renderTable({
     result_ya()
   })
-  #Вывод результата в формате xlsx через кнопку загрузки
+# Вывод результата в формате xlsx через кнопку загрузки
   output$Download_yandex_search <- downloadHandler(
     filename <- function() {
       "Yandex_search.xlsx"
@@ -287,8 +311,8 @@ server <- function(input, output, session) {
     }
   )
   
-  #API геокодера Яндекса
-  #Чтение xlsx-файла и входных параметров
+# API геокодера Яндекса---------------------------------------------------------
+# Чтение xlsx-файла и входных параметров
   to_geo <- reactive({
     req(input$address_file)
     input_file <- input$address_file
@@ -308,12 +332,12 @@ server <- function(input, output, session) {
   ld_2 <- reactive({
     input$coordld_line_2
   })
-  #Передаем названия столбцов для выбора столбца с адресом
+# Передаем названия столбцов для выбора столбца с адресом
   observe({
     req(to_geo())
     updateSelectInput(session = session, inputId = "select_col", choices = colnames(to_geo()))
   })
-  #Ищем координаты и ставим шкалу прогресса
+# Ищем координаты и ставим шкалу прогресса
   result_geo <- eventReactive(input$Start_geocoding, {
     progress <- Progress$new()
     on.exit(progress$close())
@@ -333,7 +357,7 @@ server <- function(input, output, session) {
     colnames(geocode_result) <- c('Request', 'AddressLine', 'point',	'kind', 'precision', 'Country', 'AdministrativeAreaName',	'LocalityName',	'ThoroughfareName',	'PremiseNumber')
     return(geocode_result)
   })
-  #Вывод таблицы с результатами и сохранение их в xlsx-файл
+# Вывод таблицы с результатами и сохранение их в xlsx-файл
   output$Geocode_results <- renderTable({
     result_geo()
   })
@@ -346,82 +370,115 @@ server <- function(input, output, session) {
     }
   )
   
-  ##Просмотр потоков
-  map_base <- shp_input_server("shp_file_flows")
-  output$map_flows <- renderLeaflet({
-    leaflet() %>%
-      addTiles() %>%
-      setView(37.601147, 55.775249, zoom = 17)
-  })
-  #Читаем список названий xlsx-файлов и переименовываем их
-  #Затем читаем сами файлы
-  debug_data <- reactive({
-    req(input$xlsx_file_flows, map_base())
-    debug_files <- input$xlsx_file_flows
-    tempdirname <- dirname(debug_files$datapath[1])
-    for (i in 1:nrow(debug_files)) {
-      file.rename(debug_files$datapath[i], paste0(tempdirname, "/", debug_files$name[i]))
+# Объединение списков-----------------------------------------------------------
+# Читаем шейпы
+  region_shp <- shp_input_server("shp_file_2")
+# Читаем xlsx-файлы
+  input_dfs <- reactive({
+    req(input$xlsx_files)
+    input_files <- input$xlsx_files
+    tempdirname <- dirname(input_files$datapath[1])
+    list_df <- list()
+    for (i in 1:nrow(input_files)) {
+      file.rename(input_files$datapath[i], paste0(tempdirname, "/", input_files$name[i]))
+      list_df[[i]] <- suppressWarnings(
+        read.xlsx(paste0(tempdirname, "/", input_files$name[i]), sheet = 1, colNames = TRUE, skipEmptyRows = FALSE, skipEmptyCols = TRUE)
+      )
     }
-    parsed_files <- paste0(tempdirname, "/", debug_files$name)
-    inc <<- 0
-    progress <<- Progress$new()
-    on.exit(progress$close())
-    progress$set(message = "Обработка файлов", value = 0)
-    debug_files <- get_flows_df(flows_files = parsed_files,
-                                         region = map_base(),
-                                         zone_name = input$zone_name)
-    return(debug_files)
+    names(list_df) <- str_remove_all(input_files$name, ".xlsx")
+    return(list_df)
   })
   observe({
-    req(map_base(), debug_data())
-    updateSelectInput(session = session, 
-                      inputId = "select_col_periods", 
-                      choices = as.numeric(unlist(str_extract_all(debug_data()$periods, "[[:digit:]]"))))
-    b <- unname(st_bbox(map_base()))
-    leafletProxy("map_flows", data = map_base()) %>%
-      addPolygons(fillOpacity = 0.4,
-                  fillColor = "lightblue",
-                  color = "black",
-                  weight = 1) %>%
-      addScaleBar(position = "bottomleft") %>% 
-      flyToBounds(lng1 = b[1], lat1 = b[2], lng2 = b[3], lat2 = b[4])
+    req(input_dfs())
+    updateSelectInput(session = session, inputId = "select_master_set", choices = c("", names(input_dfs())))
   })
-  # Ставим цвета потокам и выводим потоки на экран
-  flow_col <- reactive({
-    req(debug_data())
-    cf <- colorFactor(palette = "Set1", domain = unique(debug_data()$flows_aggr$output_treat_name))
-    Sys.sleep(2)
-    return(cf)
-  })
-  observeEvent(input$select_col_periods, ignoreNULL = TRUE, {
-    req(flow_col())
-    get_flows_period(flows_result = debug_data(),
-                     flow_map = map_base(),
-                     flow_col = flow_col(),
-                     set_period = input$select_col_periods,
-                     show_aggregated_flows = input$checkbox_aggregate,
-                     leafletmap_name = "map_flows")
+  # Чистим файлы специальной функцией
+  clear_dfs <- reactive({
+    req(input_dfs(), region_shp())
+    region_name_column <<- colnames(region_shp())[grepl("name", colnames(region_shp()), ignore.case = TRUE)]
+    if (length(region_name_column) < 1) {
+      # id <- showNotification("Can not detect region name!", 
+      #                  type = "warning", duration = 10)
+      return(NULL)
+    } else {
+      if (length(region_name_column) > 1) {
+        # id <- showNotification("Ambiguous region name!", 
+        #                  type = "warning", duration = 10)
+        return(NULL)
+      } else {
+        region_name <<- region_shp() %>%
+          st_drop_geometry() %>%
+          select(all_of(region_name_column)) %>%
+          pull()
+      }
+    }
+    return(region_name)
+    # parsing_dfs(region_shp(), input_dfs())
   })
   
-  output$Download_flows <- downloadHandler(
-    filename <- function() {
-      "mw_flows.xlsx"
-    },
-    content <- function(file) {
-      out_xlsx <- st_drop_geometry(debug_data()$flows_aggr) %>% 
-        select(-c(original_id, treatment_type, treat_id))
-      out_xlsx_long <- st_drop_geometry(debug_data()$flows) %>% 
-        select(-c(original_id, treatment_type, treat_id))
-      out_xlsx_names <- c("ID начальной точки", "ID конечной точки", "Масса, тонн",
-                          "Длина потока, км.", "Объем, куб. м", "Тип обращения",
-                          "Период", "Тип потока", "ID административной территории",
-                          "Начальная точка", "Конечная точка")
-      colnames(out_xlsx) <- out_xlsx_names
-      colnames(out_xlsx_long) <- out_xlsx_names
-      write.xlsx(list("Потоки от территорий" = out_xlsx, 
-                      "Потоки от источников" = out_xlsx_long), file)
-    }
-  )
+
+  
+  # 
+  # 
+  # map_base <- 
+  # output$map_flows <- renderLeaflet({
+  #   leaflet() %>%
+  #     addTiles() %>%
+  #     setView(37.601147, 55.775249, zoom = 17)
+  # })
+  # #Читаем список названий xlsx-файлов и переименовываем их
+  # #Затем читаем сами файлы
+  # 
+  # observe({
+  #   req(map_base(), debug_data())
+  #   updateSelectInput(session = session, 
+  #                     inputId = "select_col_periods", 
+  #                     choices = as.numeric(unlist(str_extract_all(debug_data()$periods, "[[:digit:]]"))))
+  #   b <- unname(st_bbox(map_base()))
+  #   leafletProxy("map_flows", data = map_base()) %>%
+  #     addPolygons(fillOpacity = 0.4,
+  #                 fillColor = "lightblue",
+  #                 color = "black",
+  #                 weight = 1) %>%
+  #     addScaleBar(position = "bottomleft") %>% 
+  #     flyToBounds(lng1 = b[1], lat1 = b[2], lng2 = b[3], lat2 = b[4])
+  # })
+  # # Ставим цвета потокам и выводим потоки на экран
+  # flow_col <- reactive({
+  #   req(debug_data())
+  #   cf <- colorFactor(palette = "Set1", domain = unique(debug_data()$flows_aggr$output_treat_name))
+  #   Sys.sleep(2)
+  #   return(cf)
+  # })
+  # observeEvent(input$select_col_periods, ignoreNULL = TRUE, {
+  #   req(flow_col())
+  #   get_flows_period(flows_result = debug_data(),
+  #                    flow_map = map_base(),
+  #                    flow_col = flow_col(),
+  #                    set_period = input$select_col_periods,
+  #                    show_aggregated_flows = input$checkbox_aggregate,
+  #                    leafletmap_name = "map_flows")
+  # })
+  # 
+  # output$Download_flows <- downloadHandler(
+  #   filename <- function() {
+  #     "mw_flows.xlsx"
+  #   },
+  #   content <- function(file) {
+  #     out_xlsx <- st_drop_geometry(debug_data()$flows_aggr) %>% 
+  #       select(-c(original_id, treatment_type, treat_id))
+  #     out_xlsx_long <- st_drop_geometry(debug_data()$flows) %>% 
+  #       select(-c(original_id, treatment_type, treat_id))
+  #     out_xlsx_names <- c("ID начальной точки", "ID конечной точки", "Масса, тонн",
+  #                         "Длина потока, км.", "Объем, куб. м", "Тип обращения",
+  #                         "Период", "Тип потока", "ID административной территории",
+  #                         "Начальная точка", "Конечная точка")
+  #     colnames(out_xlsx) <- out_xlsx_names
+  #     colnames(out_xlsx_long) <- out_xlsx_names
+  #     write.xlsx(list("Потоки от территорий" = out_xlsx, 
+  #                     "Потоки от источников" = out_xlsx_long), file)
+  #   }
+  # )
 }
 
 shinyApp(ui, server)
