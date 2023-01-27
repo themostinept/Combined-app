@@ -1,4 +1,4 @@
-##Function to parse debug-files
+# Function to parse debug-files
 get_flows_df <- function(flows_files, region, zone_name = "Зоны транспортирования") {
   #prepare flow files
   periods <- unlist(str_extract_all(flows_files, "period-[[:digit:]].debug"))
