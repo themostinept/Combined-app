@@ -140,7 +140,7 @@ ui <- tagList(
       ),
         #Панель вывода результатов
       mainPanel(
-        textOutput("Check input")
+        textOutput("Check_input")
       )
     )
   )
@@ -395,26 +395,20 @@ server <- function(input, output, session) {
   # Чистим файлы специальной функцией
   clear_dfs <- reactive({
     req(input_dfs(), region_shp())
-    region_name_column <<- colnames(region_shp())[grepl("name", colnames(region_shp()), ignore.case = TRUE)]
-    if (length(region_name_column) < 1) {
-      # id <- showNotification("Can not detect region name!", 
-      #                  type = "warning", duration = 10)
-      return(NULL)
-    } else {
-      if (length(region_name_column) > 1) {
-        # id <- showNotification("Ambiguous region name!", 
-        #                  type = "warning", duration = 10)
-        return(NULL)
-      } else {
-        region_name <<- region_shp() %>%
-          st_drop_geometry() %>%
-          select(all_of(region_name_column)) %>%
-          pull()
-      }
-    }
-    return(region_name)
-    # parsing_dfs(region_shp(), input_dfs())
+    parsing_dfs(region_shp(), input_dfs())
   })
+  observe({
+    req(clear_dfs())
+    if (clear_dfs()$status == 'err') {
+      showNotification(paste0(clear_dfs()$message, collapse = ""),
+                       type = "warning", duration = 10)
+    }
+    if (clear_dfs()$status == 'ok') {
+      output$Check_input <- renderPrint(clear_dfs()[c("status", "Common attributes:")])
+    }
+  })
+  # Сопоставляем точки из файлов
+  # Сохраняем результат
   
 
   
