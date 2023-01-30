@@ -19,6 +19,7 @@ source("read_shp_module.R")
 source("point_over_map_function.R")
 source("lonlat2UTM.R")
 source("parsing_files_for_merging.R")
+source("geo_merging.R")
 sf_use_s2(FALSE)
 
 # Элементы пользовательского интерфейса
@@ -135,11 +136,14 @@ ui <- tagList(
         checkboxInput("check_attributes", label = "Учитывать совпадающие атрибуты", value = TRUE),
         hr(),
         numericInput("max_distance", label = h5("Максимальный радиус объединения (в метрах)"), value = 25, min = 1, max = 500, step = 1),
-        fluidRow(column(3)),
-        downloadButton("Download_merging", label = "Получить файл")
+        fluidRow(column(3))
       ),
         #Панель вывода результатов
       mainPanel(
+        div(style = "position:absolute;right:1em;", 
+            actionButton("Start_matching", "Сопоставить файлы"),
+            downloadButton("Download_merging", label = "Получить файл")
+        ),
         textOutput("Check_input")
       )
     )
@@ -408,8 +412,31 @@ server <- function(input, output, session) {
     }
   })
   # Сопоставляем точки из файлов
+  master_set <- reactive({
+    input$select_master_set
+  })
+  check_attrs <- reactive({
+    input$check_attributes
+  })
+  max_dist <- reactive({
+    input$max_distance
+  })
+  result_merging <- eventReactive(input$Start_matching, {
+    req(clear_dfs())
+    geo_merging(master_set = master_set(), d_max = max_dist(),
+                check_attributes = check_attrs(), list_df = clear_dfs()$list_df,
+                list_attr = clear_dfs()$list_attr, region_name = clear_dfs()$region_name,
+                region_name_column = clear_dfs()$region_name_column)
+  })
   # Сохраняем результат
-  
+  output$Download_merging <- downloadHandler(
+    filename <- function() {
+      "Merged_files.xlsx"
+    },
+    content <- function(file) {
+      write.xlsx(result_merging(), file)
+    }
+  )
 
   
   # 

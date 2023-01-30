@@ -83,6 +83,7 @@ parsing_dfs <- function(region_shp, list_df) {
     result_list$'Common attributes:' <- "No common attributes!"
   }
   result_list$status <- "ok"
-  result_list <- c(result_list, list(list_df, list_attr, region_name))
+  result_list <<- c(result_list, list(list_df = list_df, list_attr = list_attr, 
+                                      region_name = region_name, region_name_column = region_name_column))
   return(result_list)
 }
