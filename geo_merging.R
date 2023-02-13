@@ -3,8 +3,8 @@ geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, l
   ## Determine EPSG for all dataframes
   EPSG_2_UTM <- lonlat2UTM(list_df[[1]]$point)
   ## sort list of dataframes by number of rows
-  list_df_2 <<- list_df
-  ordered_rows <<- sort(map_int(list_df, nrow), decreasing = TRUE)
+  list_df_2 <- list_df
+  ordered_rows <- sort(map_int(list_df, nrow), decreasing = TRUE)
   if (master_set != "") {
     m <- which(names(ordered_rows) == master_set)
     ordered_rows <- c(ordered_rows[m], ordered_rows[-m])
