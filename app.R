@@ -8,10 +8,11 @@ require(openxlsx)
 require(curl)
 require(xml2)
 require(sf)
-require(leaflet)
+# require(leaflet)
 require(RColorBrewer)
-require(memoise)
-require(cachem)
+# require(memoise)
+# require(cachem)
+require(geosphere)
 
 
 source("ya_api_functions.R")
@@ -422,12 +423,18 @@ server <- function(input, output, session) {
   max_dist <- reactive({
     input$max_distance
   })
+
   result_merging <- eventReactive(input$Start_matching, {
     req(clear_dfs())
-    geo_merging(master_set = master_set(), d_max = max_dist(),
+    result_merging <- geo_merging(master_set = master_set(), d_max = max_dist(),
                 check_attributes = check_attrs(), list_df = clear_dfs()$list_df,
                 list_attr = clear_dfs()$list_attr, region_name = clear_dfs()$region_name,
                 region_name_column = clear_dfs()$region_name_column)
+    return(result)
+  })
+  observeEvent(input$Start_matching, {
+    req(result_merging())
+    output$Check_input <- renderPrint(names(result_merging()))
   })
   # Сохраняем результат
   output$Download_merging <- downloadHandler(

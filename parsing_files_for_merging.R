@@ -30,7 +30,7 @@ parsing_dfs <- function(region_shp, list_df) {
     return(list(status = 'err', message = msg))
   }
 # Check coordinates and make sf dataframes
-  progress$set(message = enc2utf8("Читаем и проверяем файлы"), value = 0)
+  progress$set(message = "Reading and checking files", value = 0)
   inc_2 <- 0
   for (i in seq_along(list_df)) {
     inc_2 <<- inc_2 + 1
@@ -83,7 +83,7 @@ parsing_dfs <- function(region_shp, list_df) {
     result_list$'Common attributes:' <- "No common attributes!"
   }
   result_list$status <- "ok"
-  result_list <<- c(result_list, list(list_df = list_df, list_attr = list_attr, 
+  result_list <- c(result_list, list(list_df = list_df, list_attr = list_attr, 
                                       region_name = region_name, region_name_column = region_name_column))
   return(result_list)
 }
