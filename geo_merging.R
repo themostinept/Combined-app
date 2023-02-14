@@ -2,6 +2,8 @@
 geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, list_df, list_attr, region_name, region_name_column) {
   ## Determine EPSG for all dataframes
   EPSG_2_UTM <- lonlat2UTM(list_df[[1]]$point)
+  progress <- Progress$new()
+  on.exit(progress$close())
   ## sort list of dataframes by number of rows
   list_df_2 <- list_df
   ordered_rows <- sort(map_int(list_df, nrow), decreasing = TRUE)
@@ -16,8 +18,10 @@ geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, l
   # Start matching----------------------------------------------------------------
   result <- list()
   no_match <- list(NULL)
+  progress$set(message = "Merging files")
   for (i in seq_len(length(list_df) - 1)) {
-   print(i)
+    print(i)
+    progress$inc(1 / length(list_df))
   ## take a dataframe to match with
     df <- list_df[[i]] %>%
       select(c("id", contains(c(list_attr, region_name_column, "dist")), "point"))
@@ -58,6 +62,7 @@ geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, l
       no_match_id <- NULL
   ## start of loop through regions------------------------------------------------
       for (j in seq_along(df_regions_vec)) {
+        progress$set(detail = paste0("File ", k, ", Current region: ", df_regions_vec[j], collapse = ""))
         print(df_regions_vec[j])
         lost_id <- NULL
   ## choose a region
@@ -144,6 +149,6 @@ geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, l
     filter(id %in% no_match[[i + 1]]) %>%
     select(c("id", contains(c(list_attr, region_name_column)), "point"))
   result[[i + 1]] <- last_sheet
-  names(result) <- names(list_df)
+  names(result) <- sapply(names(list_df), function(x) str_trunc(x, width = 25), USE.NAMES = FALSE)
   return(result)
 }

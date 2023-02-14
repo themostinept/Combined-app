@@ -127,8 +127,8 @@ ui <- tagList(
                   'dist', где указано расстояние в метрах, в пределах которого может быть
                   привязана точка из другого списка.
                   Для записей, у которых отсутствует значение dist, будет проставлено расстояние из настройки ниже.
-                  Если не выбран основной файл, то основнным будет считаться наибольший по числу записей.
-                  Если выключен параметр 'Учитывать совпадающие атрибуты', то объединение будет производиться исключительно по степени близости"),
+                  Если не выбран основной файл, то основным будет считаться наибольший по числу записей.
+                  Если выключен параметр 'Учитывать совпадающие атрибуты', то объединение будет производиться исключительно по степени близости."),
         hr(),
         shp_input_UI("shp_file_2", label = h4("Выберите shp и сопутствующие ему файлы")),
         hr(),
@@ -385,6 +385,7 @@ server <- function(input, output, session) {
     input_files <- input$xlsx_files
     tempdirname <- dirname(input_files$datapath[1])
     list_df <- list()
+    showModal(modalDialog("Сохраняем файлы"))
     for (i in 1:nrow(input_files)) {
       file.rename(input_files$datapath[i], paste0(tempdirname, "/", input_files$name[i]))
       list_df[[i]] <- suppressWarnings(
@@ -392,13 +393,23 @@ server <- function(input, output, session) {
       )
     }
     names(list_df) <- str_remove_all(input_files$name, ".xlsx")
+    removeModal()
     return(list_df)
   })
   observe({
     req(input_dfs())
     updateSelectInput(session = session, inputId = "select_master_set", choices = c("", names(input_dfs())))
   })
-  # Чистим файлы специальной функцией
+  master_set <- reactive({
+    input$select_master_set
+  })
+  check_attrs <- reactive({
+    input$check_attributes
+  })
+  max_dist <- reactive({
+    input$max_distance
+  })
+  # Проверяем файлы специальной функцией
   clear_dfs <- reactive({
     req(input_dfs(), region_shp())
     parsing_dfs(region_shp(), input_dfs())
@@ -414,19 +425,9 @@ server <- function(input, output, session) {
     }
   })
   # Сопоставляем точки из файлов
-  master_set <- reactive({
-    input$select_master_set
-  })
-  check_attrs <- reactive({
-    input$check_attributes
-  })
-  max_dist <- reactive({
-    input$max_distance
-  })
-
   result_merging <- eventReactive(input$Start_matching, {
     req(clear_dfs())
-    result_merging <- geo_merging(master_set = master_set(), d_max = max_dist(),
+    result <- geo_merging(master_set = master_set(), d_max = max_dist(),
                 check_attributes = check_attrs(), list_df = clear_dfs()$list_df,
                 list_attr = clear_dfs()$list_attr, region_name = clear_dfs()$region_name,
                 region_name_column = clear_dfs()$region_name_column)
@@ -434,7 +435,7 @@ server <- function(input, output, session) {
   })
   observeEvent(input$Start_matching, {
     req(result_merging())
-    output$Check_input <- renderPrint(names(result_merging()))
+    output$Check_input <- renderPrint("Можно скачать!")
   })
   # Сохраняем результат
   output$Download_merging <- downloadHandler(
@@ -445,69 +446,6 @@ server <- function(input, output, session) {
       write.xlsx(result_merging(), file)
     }
   )
-
-  
-  # 
-  # 
-  # map_base <- 
-  # output$map_flows <- renderLeaflet({
-  #   leaflet() %>%
-  #     addTiles() %>%
-  #     setView(37.601147, 55.775249, zoom = 17)
-  # })
-  # #Читаем список названий xlsx-файлов и переименовываем их
-  # #Затем читаем сами файлы
-  # 
-  # observe({
-  #   req(map_base(), debug_data())
-  #   updateSelectInput(session = session, 
-  #                     inputId = "select_col_periods", 
-  #                     choices = as.numeric(unlist(str_extract_all(debug_data()$periods, "[[:digit:]]"))))
-  #   b <- unname(st_bbox(map_base()))
-  #   leafletProxy("map_flows", data = map_base()) %>%
-  #     addPolygons(fillOpacity = 0.4,
-  #                 fillColor = "lightblue",
-  #                 color = "black",
-  #                 weight = 1) %>%
-  #     addScaleBar(position = "bottomleft") %>% 
-  #     flyToBounds(lng1 = b[1], lat1 = b[2], lng2 = b[3], lat2 = b[4])
-  # })
-  # # Ставим цвета потокам и выводим потоки на экран
-  # flow_col <- reactive({
-  #   req(debug_data())
-  #   cf <- colorFactor(palette = "Set1", domain = unique(debug_data()$flows_aggr$output_treat_name))
-  #   Sys.sleep(2)
-  #   return(cf)
-  # })
-  # observeEvent(input$select_col_periods, ignoreNULL = TRUE, {
-  #   req(flow_col())
-  #   get_flows_period(flows_result = debug_data(),
-  #                    flow_map = map_base(),
-  #                    flow_col = flow_col(),
-  #                    set_period = input$select_col_periods,
-  #                    show_aggregated_flows = input$checkbox_aggregate,
-  #                    leafletmap_name = "map_flows")
-  # })
-  # 
-  # output$Download_flows <- downloadHandler(
-  #   filename <- function() {
-  #     "mw_flows.xlsx"
-  #   },
-  #   content <- function(file) {
-  #     out_xlsx <- st_drop_geometry(debug_data()$flows_aggr) %>% 
-  #       select(-c(original_id, treatment_type, treat_id))
-  #     out_xlsx_long <- st_drop_geometry(debug_data()$flows) %>% 
-  #       select(-c(original_id, treatment_type, treat_id))
-  #     out_xlsx_names <- c("ID начальной точки", "ID конечной точки", "Масса, тонн",
-  #                         "Длина потока, км.", "Объем, куб. м", "Тип обращения",
-  #                         "Период", "Тип потока", "ID административной территории",
-  #                         "Начальная точка", "Конечная точка")
-  #     colnames(out_xlsx) <- out_xlsx_names
-  #     colnames(out_xlsx_long) <- out_xlsx_names
-  #     write.xlsx(list("Потоки от территорий" = out_xlsx, 
-  #                     "Потоки от источников" = out_xlsx_long), file)
-  #   }
-  # )
 }
 
 shinyApp(ui, server)
