@@ -18,10 +18,10 @@ geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, l
   # Start matching----------------------------------------------------------------
   result <- list()
   no_match <- list(NULL)
-  progress$set(message = "Merging files")
   for (i in seq_len(length(list_df) - 1)) {
+    progress$set(message = "Merging files")
+    progress$inc(amount = 0)
     print(i)
-    progress$inc(1 / length(list_df))
   ## take a dataframe to match with
     df <- list_df[[i]] %>%
       select(c("id", contains(c(list_attr, region_name_column, "dist")), "point"))
@@ -62,7 +62,9 @@ geo_merging <- function(master_set = "", d_max = 25, check_attributes = FALSE, l
       no_match_id <- NULL
   ## start of loop through regions------------------------------------------------
       for (j in seq_along(df_regions_vec)) {
-        progress$set(detail = paste0("File ", k, ", Current region: ", df_regions_vec[j], collapse = ""))
+        progress$set(message = paste0("File ", k),
+                     detail = paste0("Current region: ", df_regions_vec[j], collapse = ""))
+        progress$inc(1 / length(df_regions_vec))
         print(df_regions_vec[j])
         lost_id <- NULL
   ## choose a region
